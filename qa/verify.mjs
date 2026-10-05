@@ -1,0 +1,369 @@
+import fs from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+import ts from 'typescript';
+import { webcrypto } from 'node:crypto';
+
+const history = JSON.parse(fs.readFileSync('src/question-history.json','utf8'));
+const study = JSON.parse(fs.readFileSync('src/learning.json', 'utf8'));
+let user = { userId:'tester-a',email:'a@example.test' }, unavailable = false;
+const rows = new Map();
+const db = {
+  prepare(sql) {
+    return { bind(...args) {
+      return {
+        async first() { await Promise.resolve(); const row=rows.get(args[0]); return row ? {...row} : null; },
+        async run() {
+          await Promise.resolve();
+          if (sql.startsWith('INSERT')) {
+            if (!rows.has(args[0])) rows.set(args[0], {state_json:args[1],revision:0});
+            return {meta:{changes:1}};
+          }
+          const row=rows.get(args[2]);
+          if (row.revision !== args[3]) return {meta:{changes:0}};
+          rows.set(args[2], {state_json:args[0],revision:row.revision+1});
+          return {meta:{changes:1}};
+        }
+      };
+    } };
+  }
+};
+let source = fs.readFileSync('app/api/progress/route.ts','utf8');
+source=source.replace(/^import .*;\n/gm,'').replace(/\bexport /g,'');
+source=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
+const api=vm.createContext({Response,Request,URL,Date,Map,Set,JSON,console:{error(){}},learning:study,history,
+  getChatGPTUser:async()=>user,getRawDb:()=>{if(unavailable) throw new Error('DB unavailable');return db;}});
+vm.runInContext(source+'\nglobalThis.api={GET,POST};',api);
+const request=(body,origin='https://study.test')=>new Request('https://study.test/api/progress',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
+const post=body=>api.api.POST(request(body));
+user=null; assert.equal((await api.api.GET()).status,401); assert.equal((await post({type:'learn',moduleId:'m01'})).status,401);
+user={userId:'tester-a',email:'a@example.test'};
+assert.equal((await api.api.POST(request({type:'learn',moduleId:'m01'},'https://other.test'))).status,403);
+assert.equal((await post({type:'answer',questionId:'q001',choice:99})).status,400);
+assert.equal(rows.size,0);
+const q=study.questions[0];
+let result=await (await post({type:'answer',questionId:q.id,choice:(q.answer+1)%4,userId:'tester-b',mutationId:'operation-test-0001'})).json();
+assert.equal(result.correct,false); assert.equal(result.state.attempts[q.id].wrong,1);assert(!rows.has('tester-b'));
+result=await (await post({type:'answer',questionId:q.id,choice:(q.answer+1)%4,mutationId:'operation-test-0001'})).json();
+assert.equal(result.state.attempts[q.id].count,1,'retry is idempotent');
+const writes=await Promise.all([1,2,3].map(i=>post({type:'answer',questionId:q.id,choice:q.answer,mutationId:'concurrent-operation-'+i})));
+assert(writes.every(r=>r.status===200));
+result=await (await api.api.GET()).json();
+assert.equal(result.state.attempts[q.id].count,4,'simultaneous devices preserve all writes');
+const chapter=study.curriculum[0];
+if(chapter) {
+assert.equal((await post({type:'read',chapterId:chapter.id,page:chapter.end+1})).status,400);
+assert.equal((await post({type:'read',chapterId:chapter.id,page:chapter.start})).status,200);
+assert.equal((await post({type:'learn',moduleId:chapter.id})).status,200);
+}
+// Multiple answer payloads are validated server-side, graded as sets and persisted under the account.
+const multi=study.questions.find(q=>q.answers&&q.answers.length<4),wrongIndex=multi.options.findIndex((_,i)=>!multi.answers.includes(i));
+for(const choice of [[],[0,0],[4],['0'],[true],0,null,[[0]]])assert.equal((await post({type:'answer',questionId:multi.id,choice})).status,400,'malformed multi selection rejected');
+assert.equal((await post({type:'answer',questionId:q.id,choice:[q.answer]})).status,400,'single question rejects array');
+result=await (await post({type:'answer',questionId:multi.id,choice:[...multi.answers].reverse(),mutationId:'multi-correct-000001'})).json();
+assert.equal(result.correct,true,'selection order does not affect grading');assert.deepEqual(result.state.attempts[multi.id].lastChoice,[...multi.answers].sort());
+const multiCount=result.state.attempts[multi.id].count;
+result=await (await post({type:'answer',questionId:multi.id,choice:[...multi.answers].reverse(),mutationId:'multi-correct-000001'})).json();assert.equal(result.state.attempts[multi.id].count,multiCount,'multi retry deduplicated');
+result=await (await post({type:'answer',questionId:multi.id,choice:[multi.answers[0]]})).json();assert.equal(result.correct,false,'partial selection is not fully correct');
+result=await (await post({type:'answer',questionId:multi.id,choice:[...multi.answers,wrongIndex]})).json();assert.equal(result.correct,false,'extra selection is incorrect');
+
+user={userId:'tester-b',email:'b@example.test'};
+result=await (await api.api.GET()).json(); assert.equal(Object.keys(result.state.attempts).length,0,'account isolation');
+unavailable=true; assert.equal((await api.api.GET()).status,503);unavailable=false;
+user={userId:'frontend-test',email:'f@example.test'};
+
+class Element {
+  constructor(id='') {this.id=id;this.children=[];this.style={};this.dataset={};this.value='';this.textContent='';this.className='';this.disabled=false;this.open=false;
+    this.classList={add:(s)=>{this.className+=' '+s},remove:(s)=>{this.className=this.className.split(' ').filter(x=>x!==s).join(' ')},toggle:(s,active)=>{this.classList[active?'add':'remove'](s)}};}
+  append(...children) {this.children.push(...children);}
+  replaceChildren(...children) {this.children=[...children];}
+  setAttribute(name,value) {this[name]=value;}
+  removeAttribute(name) {delete this[name];}
+  scrollIntoView() {}
+  focus() {this.focused=true;}
+  querySelectorAll(selector) {return this.children.filter(x=>selector==='details' ? x.tag==='details':false);}
+  get firstChild(){return this.children[0];}
+}
+const elements=new Map();
+const $=id=>{if(!elements.has(id)) elements.set(id,new Element(id)); return elements.get(id)};
+const views=['home','lesson','quiz','wrong','tools','coverage'].map($);
+const nav=['home','lesson','quiz','wrong','tools','coverage'].map(view=>{const e=new Element();e.dataset.view=view;return e});
+const document={getElementById:$,createElement:tag=>{const e=new Element();e.tag=tag;return e},createTextNode:text=>({textContent:text}),querySelectorAll:selector=>selector==='.view'?views:nav};
+let loseResponse=false,delayAnswer=false,releaseAnswer;const drafts=new Map();
+const context=vm.createContext({document,window:{location:{search:'?module=m14'},scrollTo(){},addEventListener(){}},localStorage:{getItem:k=>drafts.get(k)||null,setItem:(k,v)=>drafts.set(k,v),removeItem:k=>drafts.delete(k)},crypto:webcrypto,URLSearchParams,Date,Math,Map,JSON,console,setTimeout,clearTimeout,
+  fetch:async(url,options={})=>{
+    if(url.startsWith('references/'))return Response.json(JSON.parse(fs.readFileSync('public/'+url.split('?')[0],'utf8')));
+    if (options.method==='POST') {if(delayAnswer){delayAnswer=false;await new Promise(resolve=>releaseAnswer=resolve);}const response=await api.api.POST(request(JSON.parse(options.body)));if(loseResponse){loseResponse=false;throw new Error('network response lost')}return response;}
+    return api.api.GET();
+  }});
+vm.runInContext(fs.readFileSync('public/learning-data.js','utf8')+fs.readFileSync('public/data.js','utf8')+fs.readFileSync('public/study-app.js','utf8'),context);
+assert.equal(vm.runInContext('currentModule',context),'m14','regional deep link opens course');
+await vm.runInContext('loadAccount()',context);
+assert.equal(vm.runInContext('signedIn && accountReady',context),true);
+// True immediate feedback: let the write wait while two answers and Next remain usable.
+const drain=async()=>{for(let i=0;i<100;i++){await new Promise(r=>setTimeout(r,1));if(vm.runInContext('!syncing',context)){await vm.runInContext('flushAnswers()',context);if(vm.runInContext('answerOutbox.length===0',context))return;}}throw new Error('outbox did not drain');};
+function answerQuestion(q,choices=q.answers||[q.answer]) {
+ if(q.answers){for(const index of choices)$('options').children.find(b=>b.textContent.endsWith(q.options[index])).onclick();$('submitAnswer').onclick();}
+ else $('options').children.find(b=>b.textContent.endsWith(q.options[choices[0]])).onclick();
+}
+vm.runInContext('startEndless()',context);
+delayAnswer=true;
+const first=JSON.parse(vm.runInContext('JSON.stringify(queue[at])',context));
+answerQuestion(first);
+assert.equal(vm.runInContext('answered',context),true,'grade is synchronous before network response');
+assert($('feedback').children.some(x=>x.textContent?.startsWith('答对了')));
+assert(!$('nextQuestion').className.includes('hidden'));
+vm.runInContext('nextQuestion()',context);
+assert.notEqual(vm.runInContext('queue[at].id',context),first.id);
+const second=JSON.parse(vm.runInContext('JSON.stringify(queue[at])',context));
+answerQuestion(second);
+assert.equal(vm.runInContext('sessionAnswered',context),2);assert.equal(vm.runInContext('answerOutbox.length',context),2);
+releaseAnswer();await drain();
+assert.equal(JSON.parse(rows.get('frontend-test').state_json).attempts[first.id].count,1);
+assert.equal(JSON.parse(rows.get('frontend-test').state_json).attempts[second.id].count,1);
+assert.equal([...drafts.keys()].filter(key=>key.startsWith('gongji-answer-drafts:')).length,0,'confirmed answer drafts removed');
+await vm.runInContext('loadAccount()',context);vm.runInContext('startEndless()',context);assert(![first.id,second.id].includes(vm.runInContext('queue[at].id',context)),'account-based restart skips practiced questions');
+// Cover the full bank with optimistic local progress, verifying randomized labels and all explanations.
+vm.runInContext('startEndless()',context);
+const cycleSize=vm.runInContext('practicePool.length',context),seen=new Set();
+assert.equal(cycleSize,study.questions.length);
+for(let i=0;i<cycleSize+12;i++) {
+ const current=JSON.parse(vm.runInContext('JSON.stringify(queue[at])',context));
+ if(i<cycleSize-2){assert(!seen.has(current.id),'new questions never repeat while unseen remain');seen.add(current.id);}
+ const correct=current.answer;
+ answerQuestion(current);
+ const notes=$('feedback').children.find(el=>el.className==='option-notes');assert.equal(notes.children.length,4);
+ const order=JSON.parse(vm.runInContext('JSON.stringify(displayOrder)',context));
+ order.forEach((original,display)=>assert.equal(notes.children[display].children[1].textContent,current.optionExplanations[original]));
+ assert($('feedback').children.some(el=>el.textContent===current.extension));
+ assert.equal($('nextQuestion').textContent,'下一题');
+ vm.runInContext('nextQuestion()',context);
+ if(i===cycleSize-3)assert($('practiceStatus').textContent.includes('均已做过'));
+ // Flush every batch boundary, otherwise the real background request could leave synthetic drafts too large.
+ if(i%20===19)await drain();
+}
+await drain();
+assert($('quizCounter').textContent.includes('复习题'));
+// Lost response: answer remains visible, retry does not regrade or double count.
+vm.runInContext("startQuiz(STUDY.questions.filter(q=>q.module==='m01'))",context);
+const current=JSON.parse(vm.runInContext('JSON.stringify(queue[at])',context));
+const countBefore=JSON.parse(rows.get('frontend-test').state_json).attempts[current.id]?.count||0;
+loseResponse=true;
+answerQuestion(current);
+for(let i=0;i<100&&vm.runInContext('syncing',context);i++)await new Promise(r=>setTimeout(r,1));
+assert.equal(vm.runInContext('answered && syncError',context),true);
+assert.equal(vm.runInContext('answerOutbox.length',context),1);
+await vm.runInContext('flushAnswers()',context);
+assert.equal(JSON.parse(rows.get('frontend-test').state_json).attempts[current.id].count,countBefore+1);
+assert.equal(vm.runInContext('answerOutbox.length',context),0);
+if(chapter) {
+await vm.runInContext(`openChapter('${chapter.id}')`,context);
+assert.equal($('chapterTitle').textContent,chapter.title);
+if(chapter.end>chapter.start){await vm.runInContext('turnChapterPage(1)',context);assert.equal(JSON.parse(rows.get('frontend-test').state_json).reading[chapter.id].page,chapter.start+1);}
+await $('markChapter').onclick();
+assert.equal(JSON.parse(rows.get('frontend-test').state_json).learned[chapter.id],true);
+}
+const courseButton=nav.find(button=>button.dataset.view==='lesson');
+vm.runInContext('currentChapter = null;currentPoint=null',context);courseButton.onclick();assert($('lessonGuide').children.length>0,'course entry opens authored teaching');assert.equal($('moduleLesson').className.includes('hidden'),false);
+$('chapterOverview').onclick();assert($('lessonCards').children.length>0,'knowledge overview is available');
+for (const chapter of study.curriculum) {
+ await vm.runInContext(`openChapter('${chapter.id}')`,context);
+ assert($('chapterText').textContent.length>0, chapter.id+' renders text or explicit OCR empty state');
+}
+$('courseSearch').value='合同';vm.runInContext('renderCourseDirectory()',context);assert(vm.runInContext('courseChapters().length',context)>0);
+$('courseSearch').value='不存在的测试章节';vm.runInContext('renderCourseDirectory()',context);assert.equal(vm.runInContext('courseChapters().length',context),0);
+$('courseSearch').value='';$('courseBook').value='bottom';
+await $('fullBook').onclick();assert.equal(vm.runInContext('currentChapter.isBook',context),true);
+$('chapterPageInput').value='314';await $('chapterJump').onclick();assert.equal(vm.runInContext('chapterPage',context),314);
+assert.equal(JSON.parse(rows.get('frontend-test').state_json).reading[vm.runInContext('currentChapter.id',context)].page,314);
+assert($('accountEntry').textContent.includes('账号'));
+vm.runInContext("show('tools')",context);assert.equal($('timelineTabs').children.length,study.timelines.length);assert($('methodContent').children.length===study.modules.length);
+$('hideDates').onclick();const node=$('timelineContent').children.find(x=>x.className==='timeline').children[0];assert(node.children[0].textContent.includes('回忆时间'));node.children[0].onclick();assert.equal(node.children[0].textContent,study.timelines[0].events[0][0]);
+$('coverageModule').value='all';$('coverageStatus').value='all';vm.runInContext("show('coverage')",context);assert.equal($('coverageList').children.length,60);
+assert.equal($('moduleGrid').children.length,10,'nine subjects and Jilin regional entry');
+for(const m of study.modules){vm.runInContext(`openLesson('${m.id}')`,context);assert($('lessonGuide').children.length>10);assert($('lessonPoints').children.length>2);}
+for(const point of study.knowledge){vm.runInContext(`openPoint('${point.id}')`,context);assert($('pointLesson').children.length>8,point.id+' contains teaching and related practice');}
+assert(study.knowledge.every(p=>(p.questionIds.length||p.status)&&p.questionIds.every(id=>study.questions.some(q=>q.id===id))));
+assert(study.questions.every(q=>q.module!=='m13'&&q.optionExplanations.length===4));
+const active=JSON.parse(fs.readFileSync('src/active-data.json','utf8'));assert(!active.pages.some(p=>(p.s==='bottom'&&p.p>=315)||(p.s==='mindmap'&&p.p>=273)));
+assert(!fs.readFileSync('public/study.html','utf8').includes('本轮'));
+// Regional content is taught, searchable and continuously usable with official evidence.
+const jilinPoints=study.knowledge.filter(p=>p.module==='m14'),jilinQuestions=study.questions.filter(q=>q.module==='m14');
+assert.equal(jilinPoints.length,63);assert.equal(jilinQuestions.length,91);
+assert.equal(new Set(jilinPoints.map(p=>p.group)).size,9);
+assert.equal(study.knowledge.filter(p=>p.module!=='m14').length,1089,'base knowledge IDs preserved');
+assert(study.questions.filter(q=>q.module!=='m14'&&!q.answers).length>500,'substantial usable base bank');
+assert(study.questions.every(q=>!/(概念回忆|对应哪个考点|该考点)/.test(q.prompt)));
+assert.equal(study.coverage.withQuestions,study.knowledge.filter(p=>p.questionIds.length).length);
+assert.equal(study.coverage.pendingReview+study.coverage.pendingQuestions+study.coverage.withQuestions,study.knowledge.length);
+assert(study.questions.every(q=>q.options.length===4&&new Set(q.options).size===4));
+$('jilinEntry').onclick();assert.equal($('lessonTitle').textContent,'吉林省情');
+assert($('lessonRefs').children.every(a=>a.href.startsWith('https://')&&!a.textContent.includes('PDF')));
+for(const detail of $('lessonExtracts').children){detail.open=true;await detail.ontoggle();assert(!detail.children[1].textContent.includes('加载失败'));}
+const walk=e=>[e,...(e.children||[]).flatMap(walk)];
+vm.runInContext("openPoint('jl-point-gdp2025')",context);
+assert(walk($('pointLesson')).some(a=>a.href?.includes('tjj.jl.gov.cn')));
+assert(!walk($('pointLesson')).some(a=>a.textContent?.includes('第 0 页')));
+vm.runInContext("startQuiz(STUDY.questions.filter(q=>q.module==='m14'))",context);
+for(let i=0;i<jilinQuestions.length+3;i++){
+ const q=JSON.parse(vm.runInContext('JSON.stringify(queue[at])',context));assert.equal(q.module,'m14');
+ answerQuestion(q);
+ assert.equal($('feedback').children.find(e=>e.className==='option-notes').children.length,4);
+ vm.runInContext('nextQuestion()',context);if(i%20===19)await drain();
+}
+await drain();
+const searchData=vm.runInNewContext(fs.readFileSync('public/data.js','utf8')+';KB_DATA');
+assert.equal(searchData.pages.filter(p=>p.s==='jilin-notes').length,9);
+assert(searchData.pages.some(p=>p.s==='jilin-notes'&&p.t.includes('梨树模式')));
+assert(!fs.readFileSync('public/search.html','utf8').includes('山东省情专题'));
+
+// Exercise the multi UI explicitly: selection is reversible and grading only happens on submit.
+$('quizType').value='mixed';
+vm.runInContext(`startQuiz([questionMap.get('${multi.id}')])`,context);
+assert($('nextQuestion').disabled);assert(!$('nextQuestion').className.includes('hidden'),'Next stays visible before grading');assert($('submitAnswer').disabled);
+const firstOption=$('options').children.find(b=>b.textContent.endsWith(multi.options[multi.answers[0]]));
+firstOption.onclick();assert.equal(vm.runInContext('answered',context),false);assert(! $('submitAnswer').disabled);assert(firstOption.className.includes('selected'));
+firstOption.onclick();assert($('submitAnswer').disabled);assert.equal(vm.runInContext('selectedChoices.size',context),0,'selection can be cancelled');
+firstOption.onclick();$('submitAnswer').onclick();
+assert.equal(vm.runInContext('answered',context),true);assert(!$('nextQuestion').disabled);assert($('answerStatus').textContent.includes('漏选'));
+assert($('feedback').children.find(e=>e.className==='option-notes').children.some(row=>row.children[0].textContent.includes('漏选')));
+await drain();
+let serverProgress=await (await api.api.GET()).json();assert.equal(serverProgress.state.attempts[multi.id].lastCorrect,false);assert.deepEqual(serverProgress.state.attempts[multi.id].lastChoice,[multi.answers[0]]);
+await vm.runInContext('loadAccount()',context);assert.equal(vm.runInContext(`state.attempts['${multi.id}'].lastChoice.length`,context),1,'selected content reloaded from account');
+// Extra + missed options have distinct explanations; all correct options use displayed, shuffled letters.
+vm.runInContext(`startQuiz([questionMap.get('${multi.id}')])`,context);answerQuestion(multi,[wrongIndex]);
+assert($('answerStatus').textContent.includes('错选')&&$('answerStatus').textContent.includes('漏选'));await drain();
+vm.runInContext(`startQuiz([questionMap.get('${multi.id}')])`,context);answerQuestion(multi);
+const actualLabels=vm.runInContext("displayOrder.map((original,i)=>queue[at].answers.includes(original)?'ABCD'[i]:null).filter(Boolean).join('、')",context);
+assert($('answerStatus').textContent.includes('正确答案 '+actualLabels));assert($('feedback').children[0].textContent.includes('答对了'));await drain();
+const allCorrect=study.questions.find(q=>q.answers?.length===4);vm.runInContext(`startQuiz([questionMap.get('${allCorrect.id}')])`,context);answerQuestion(allCorrect);assert($('answerStatus').textContent.includes('A、B、C、D'));await drain();
+$('startMultiple').onclick();assert(vm.runInContext('practicePool.every(q=>q.answers)',context),'one-click multi scope');
+for(let i=0;i<study.coverage.multipleQuestions+5;i++){const q=JSON.parse(vm.runInContext('JSON.stringify(queue[at])',context));assert(q.answers);answerQuestion(q);vm.runInContext('nextQuestion()',context);if(i%20===19)await drain();}await drain();
+$('quizType').value='single';vm.runInContext('startEndless()',context);assert(vm.runInContext('practicePool.every(q=>!q.answers)',context),'single-only scope');
+$('quizType').value='mixed';vm.runInContext('startEndless()',context);assert.equal(vm.runInContext('practicePool.length',context),study.questions.length);
+$('quizType').value='multiple';vm.runInContext(`state.attempts['${q.id}'].lastCorrect=false;renderWrong()`,context);const redoRow=$('wrongList').children.find(row=>row.children?.[0]?.textContent?.startsWith(q.id+' ·'));redoRow.children.at(-1).onclick();assert.equal(vm.runInContext('queue[at].id',context),q.id,'direct wrong question ignores unrelated filter');$('quizType').value='mixed';
+
+// Durable device cursor protects a previously confirmed answer even after short receipt history rolls over.
+user={userId:'cursor-test',email:'c@example.test'};
+const device='device-test-000001',mutation={type:'answer',questionId:q.id,choice:q.answer,deviceId:device,sequence:1,mutationId:'cursor-answer-000001'};
+await post(mutation);for(let sequence=2;sequence<=90;sequence++)await post({...mutation,sequence,mutationId:'cursor-answer-'+String(sequence).padStart(6,'0')});
+result=await (await post(mutation)).json();assert.equal(result.state.attempts[q.id].count,90);
+assert.equal((await post({type:'answers',actions:[{...mutation,sequence:91,mutationId:'cursor-answer-000091'},{type:'answer',questionId:'nonexistent',choice:0,mutationId:'bad-answer-000001'}]})).status,400);
+assert.equal((await post({type:'learn',moduleId:'m01',expectedAccountId:'different-account'})).status,409);
+// Rewritten selections cannot be interpreted as positions in the old options.
+user={userId:'revision-test',email:'r@example.test'};
+const revised=study.questions.find(q=>q.revision&&q.kind==='authored-exam');
+const legacy=history.find(q=>q.id===revised.id);
+result=await (await post({type:'answer',questionId:revised.id,questionRevision:revised.revision,choice:revised.answer,mutationId:'revision-answer-0001'})).json();
+assert.equal(result.correct,true);assert.equal(result.state.attempts[revised.id].lastQuestionRevision,revised.revision);
+assert.deepEqual(result.state.attempts[revised.id].lastChoiceText,[revised.options[revised.answer]]);
+// An old open tab/draft is graded against the original question, and retained as history.
+result=await (await post({type:'answer',questionId:legacy.id,choice:1,mutationId:'legacy-answer-000001'})).json();
+assert.equal(result.correct,false);assert.equal(result.state.attempts[legacy.id].lastQuestionRevision,'legacy');
+assert.deepEqual(result.state.attempts[legacy.id].lastChoiceText,[legacy.options[1]]);
+assert.equal(result.state.attempts[legacy.id].count,2);
+assert.equal((await post({type:'answer',questionId:revised.id,questionRevision:'wrong-version',choice:0})).status,400);
+const removed=history.find(q=>!study.questions.some(active=>active.id===q.id));
+assert.equal((await post({type:'answer',questionId:removed.id,choice:1,mutationId:'archived-answer-0001'})).status,200);
+const oldAttempt=result.state.attempts[legacy.id];
+vm.runInContext(`state.attempts['${legacy.id}']=${JSON.stringify(oldAttempt)};renderWrong()`,context);
+assert.equal(vm.runInContext(`questionAttempt(questionMap.get('${legacy.id}'))`,context),undefined,'rewritten question treated as unpracticed');
+const changedRow=$('wrongList').children.find(row=>row.children?.[0]?.textContent?.startsWith(legacy.id+' ·'));
+assert(changedRow.children.some(x=>x.textContent?.includes('本题已改写')));
+assert(!changedRow.children.some(x=>x.textContent?.startsWith('上次选择：')),'old positions are not shown against new options');
+const pendingPoint=study.knowledge.find(p=>p.status==='needs-question'&&!p.questionIds.length);
+vm.runInContext(`openPoint('${pendingPoint.id}')`,context);
+assert(walk($('pointLesson')).some(e=>e.textContent?.includes('尚未编成')));
+assert(!walk($('pointLesson')).some(e=>e.textContent==='练这个考点'));
+// Course dropdown is a labelled disclosure with full-sized selectable rows.
+vm.runInContext("openLesson('m01')",context);assert.equal($('unitMenuOptions').children.length,study.modules.length);
+const targetUnit=study.modules.find(m=>m.id==='m07'),targetButton=$('unitMenuOptions').children.find(b=>b.children[0].children[0].textContent===targetUnit.title);
+$('unitMenu').open=true;targetButton.onclick();assert.equal($('lessonTitle').textContent,targetUnit.title);assert.equal($('unitMenu').open,true,'choosing a unit preserves the open selector');assert($('unitMenuOptions').children.find(b=>b.className.includes('current')).focused);
+$('unitMenu').open=true;$('unitMenu').onkeydown({key:'Escape',preventDefault(){}});assert.equal($('unitMenu').open,false);
+const firstSection=$('lessonPoints').children.find(e=>e.className.includes('course-section'));assert(firstSection.open);assert(firstSection.children[0].children.some(e=>e.className==='section-index'));
+// Reading a point preserves the directory DOM, expanded siblings and sidebar position.
+vm.runInContext("openLesson('m01')",context);
+const directoryBefore=$('courseDirectory').children.slice();
+const groups=vm.runInContext("Array.from(directoryGroups.values()).filter(d=>JSON.parse(d.dataset.navigationKey.slice(6))[0]==='m01')",context);
+assert(groups.length>1);groups[0].open=true;groups[1].open=true;
+$('courseSidebar').scrollTop=137;
+const pointForNav=study.knowledge.find(p=>p.module==='m01');
+vm.runInContext(`openPoint('${pointForNav.id}')`,context);
+assert.equal($('courseDirectory').children[0],directoryBefore[0],'directory is updated without replacement');
+assert(groups[0].open&&groups[1].open,'expanded siblings stay open');assert.equal($('courseSidebar').scrollTop,137);
+assert.equal(vm.runInContext(`directoryPointButtons.get('${pointForNav.id}').getAttribute?.('aria-current')||directoryPointButtons.get('${pointForNav.id}')['aria-current']`,context),'page');
+vm.runInContext("openLesson('m07');openLesson('m01')",context);assert(groups[0].open&&groups[1].open,'switching units leaves other branches available');
+const lessonSection=$('lessonPoints').children.find(e=>e.className.includes('course-section'));lessonSection.open=false;
+vm.runInContext(`openPoint('${pointForNav.id}');openLesson('m01')`,context);
+assert.equal($('lessonPoints').children.find(e=>e.className.includes('course-section')).open,false,'returning to overview restores explicit collapse');
+vm.runInContext(`openPoint('${pointForNav.id}')`,context);const navigator=$('pointLesson').children[0];assert.equal(navigator['aria-label'],'考点阅读导航');
+const nextPointButton=navigator.children[1].children.find(b=>b.textContent==='下一考点');nextPointButton.onclick();assert.notEqual(vm.runInContext('currentPoint.id',context),pointForNav.id);
+const currentNavPoint=vm.runInContext('currentPoint.id',context);const currentGroup=vm.runInContext('directoryGroups.get(sectionKey(currentModule,pointGroup(currentPoint)))',context);currentGroup.open=false;$('locateCurrentPoint').onclick();assert(currentGroup.open,'manual locate reveals current point');
+// Search expansion is temporary and does not overwrite remembered closed branches.
+vm.runInContext("openLesson('m01')",context);const remembered=vm.runInContext("Array.from(directoryGroups.values()).find(d=>JSON.parse(d.dataset.navigationKey.slice(6))[0]==='m01')",context);remembered.open=false;remembered.ontoggle();
+$('courseSearch').value='法';vm.runInContext('renderCourseDirectory()',context);$('courseSearch').value='';vm.runInContext('renderCourseDirectory()',context);assert.equal(vm.runInContext(`directoryGroups.get(${JSON.stringify(remembered.dataset.navigationKey.slice(6))}).open`,context),false,'clearing search restores manual collapse');
+assert(drafts.has('gongji-course-navigation-v1'),'disclosures remembered across page loads');
+// Source-backed image assets map to real points and render only after grading.
+const visuals=JSON.parse(fs.readFileSync('src/visual-references.json','utf8'));
+assert(visuals.length>=37);assert.equal(new Set(visuals.map(i=>i.id)).size,visuals.length);
+for(const image of visuals){
+ assert(image.title&&image.alt&&image.observation&&image.author&&image.license);
+ assert(image.sourcePage.startsWith('https://commons.wikimedia.org/wiki/File:'));
+ assert(image.moduleIds.every(id=>study.modules.some(m=>m.id===id)));
+ assert(image.pointIds.every(id=>study.knowledge.some(p=>p.id===id)));
+ const bytes=fs.readFileSync('public'+image.asset);assert(bytes.length>1000);assert((bytes[0]===255&&bytes[1]===216)||bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'valid JPEG or PNG asset');
+}
+vm.runInContext("openLesson('m14')",context);
+assert.equal($('lessonViewImages').textContent,`图片对照 · ${visuals.filter(i=>i.moduleIds.includes('m14')).length} 张`);assert(!$('lessonVisuals').className.includes('hidden'));
+const moduleImage=walk($('lessonVisuals')).find(e=>e.tag==='img');assert.equal(moduleImage.loading,'lazy');assert.equal(moduleImage.decoding,'async');
+walk($('lessonVisuals')).find(e=>e.className==='visual-point-link').onclick();assert.equal(vm.runInContext('currentPoint.id',context),'jl-point-crater-lake');
+assert.equal(walk($('pointLesson')).filter(e=>e.tag==='img').length,1);
+assert(walk($('pointLesson')).some(e=>e.alt?.startsWith('长白山天池')));
+vm.runInContext("openPoint('supplement-34f6eb3faf3e83')",context);assert.equal(walk($('pointLesson')).filter(e=>e.tag==='img').length,3,'granite basalt and Huangshan associated with igneous rock');
+vm.runInContext(`openPoint('${pointForNav.id}')`,context);assert.equal(walk($('pointLesson')).filter(e=>e.tag==='img').length,0,'unrelated legal point has no scenery');
+vm.runInContext("openLesson('m01')",context);assert($('lessonViewImages').className.includes('hidden'));
+const pictureQuestion=study.questions.find(q=>q.pointIds?.includes('jl-point-crater-lake'));assert(pictureQuestion);
+user={userId:'frontend-test',email:'f@example.test'};
+vm.runInContext(`startQuiz([questionMap.get('${pictureQuestion.id}')])`,context);assert.equal(walk($('feedback')).filter(e=>e.tag==='img').length,0,'question has no visual hint before answer');
+answerQuestion(pictureQuestion);assert(walk($('feedback')).some(e=>e.tag==='img'&&e.alt.startsWith('长白山天池')));await drain();
+const imageLink=walk($('feedback')).find(e=>e.className==='visual-image-link'),feedbackImage=imageLink.children[0];
+assert.equal(imageLink.href,visuals.find(i=>i.id==='changbai-tianchi').asset);feedbackImage.onerror();assert(feedbackImage.hidden);assert.equal(imageLink.href,visuals.find(i=>i.id==='changbai-tianchi').sourcePage,'unavailable asset offers original source');
+
+// Previous restores the exact visit without submitting or grading another answer.
+const priorSingle=study.questions.find(q=>!q.answers),priorMulti=study.questions.find(q=>q.answers&&q.answers.length<4);
+vm.runInContext(`startQuiz([questionMap.get('${priorSingle.id}'),questionMap.get('${priorMulti.id}')])`,context);
+assert($('previousQuestion').disabled);$('previousQuestion').onclick();assert.equal(vm.runInContext('at',context),0);
+const visitedFirst=JSON.parse(vm.runInContext('JSON.stringify(queue[at])',context));
+const firstOrder=vm.runInContext('JSON.stringify(displayOrder)',context);
+const wrongChoice=visitedFirst.answers?[visitedFirst.answers[0]]:[(visitedFirst.answer+1)%4];
+answerQuestion(visitedFirst,wrongChoice);const firstFeedback=$('feedback').children[0].textContent;await drain();
+vm.runInContext('nextQuestion()',context);
+const visitedSecond=JSON.parse(vm.runInContext('JSON.stringify(queue[at])',context)),secondOrder=vm.runInContext('JSON.stringify(displayOrder)',context);
+const secondOptions=$('options').children.map(e=>e.textContent);
+if(visitedSecond.answers){$('options').children[0].onclick();assert.equal(vm.runInContext('selectedChoices.size',context),1);}
+const beforeVisits=vm.runInContext('sessionAnswered',context),storedVisits=JSON.parse(rows.get('frontend-test').state_json).attempts[visitedFirst.id].count;
+$('previousQuestion').onclick();assert.equal(vm.runInContext('queue[at].id',context),visitedFirst.id);assert.equal(vm.runInContext('JSON.stringify(displayOrder)',context),firstOrder);
+assert($('quizCounter').textContent.includes('回看'));assert.equal($('feedback').children[0].textContent,firstFeedback);assert($('options').children.every(b=>b.disabled));
+answerQuestion(visitedFirst);assert.equal(vm.runInContext('sessionAnswered',context),beforeVisits);assert.equal(vm.runInContext('answerOutbox.length',context),0,'revisiting or clicking read-only options never creates writes');
+$('nextQuestion').onclick();assert.equal(vm.runInContext('queue[at].id',context),visitedSecond.id);assert.equal(vm.runInContext('JSON.stringify(displayOrder)',context),secondOrder);assert.equal(vm.runInContext('queue.length',context),2,'forward reuses the existing question');
+assert($('nextQuestion').disabled,'unanswered current question still requires answer');
+if(visitedSecond.answers){assert.equal(vm.runInContext('selectedChoices.size',context),1);assert($('options').children[0].className.includes('selected'));$('options').children[0].onclick();}
+else assert.deepEqual($('options').children.map(e=>e.textContent),secondOptions);
+answerQuestion(visitedSecond);await drain();
+const afterSecond=vm.runInContext('sessionAnswered',context);$('previousQuestion').onclick();$('nextQuestion').onclick();assert.equal(vm.runInContext('sessionAnswered',context),afterSecond);
+assert.equal(JSON.parse(rows.get('frontend-test').state_json).attempts[visitedFirst.id].count,storedVisits,'history navigation leaves account count unchanged');
+$('nextQuestion').onclick();assert.equal(vm.runInContext('queue.length',context),3,'advancing past latest answered question continues random practice');assert.equal(vm.runInContext('at',context),2);
+vm.runInContext(`startQuiz([questionMap.get('${priorSingle.id}')])`,context);assert.equal(vm.runInContext('questionVisits.length',context),1);assert($('previousQuestion').disabled,'new practice scope starts fresh history');
+
+// Unsubmitted multi selections survive going back from the newest visit.
+vm.runInContext(`startQuiz([questionMap.get('${priorSingle.id}')])`,context);answerQuestion(priorSingle);await drain();
+vm.runInContext(`practicePool=[questionMap.get('${priorMulti.id}')];nextQuestion()`,context);
+const draftOrder=vm.runInContext('JSON.stringify(displayOrder)',context);$('options').children[0].onclick();$('options').children[2].onclick();
+const draftChoices=vm.runInContext('JSON.stringify([...selectedChoices])',context);$('previousQuestion').onclick();$('nextQuestion').onclick();
+assert.equal(vm.runInContext('JSON.stringify(displayOrder)',context),draftOrder);assert.equal(vm.runInContext('JSON.stringify([...selectedChoices])',context),draftChoices);
+assert(!$('submitAnswer').disabled);assert(!$('feedback').children.length);assert.equal(vm.runInContext('answered',context),false);
+
+// Every referenced UI ID must exist in the real HTML; the mock should not hide missing elements.
+const html=fs.readFileSync('public/study.html','utf8');assert(/\.answer-dock\{position:fixed;inset:auto 0 0/.test(html),'dock anchored to viewport bottom');assert(html.includes('env(safe-area-inset-bottom)'));assert(html.includes('#quizPlay{padding-bottom:150px'),'long explanations have dock clearance');assert(html.includes('aria-label="答题操作"'));assert(html.includes('id="submitAnswer"'));assert(html.indexOf('id="nextQuestion"')>html.indexOf('class="answer-dock"'),'Next lives in dock');const code=fs.readFileSync('public/study-app.js','utf8');for(const m of code.matchAll(/\$\('([^']+)'\)/g))assert(html.includes('id="'+m[1]+'"'),m[1]+' exists');
+
+console.log(JSON.stringify({status:'passed',checks:['previous restores choices order and feedback without duplicate writes','forward returns to unfinished question and keeps multi draft','practice continues after history and resets on new scope','expanded verified licensed images and valid point associations','module image gallery and point jump','lazy image loading and source fallback','answer images shown only after grading','directory branches and scroll survive point/unit navigation','overview disclosure state restored','search does not overwrite collapsed branches','previous/next point navigation','unit selector stays open until explicit dismissal','question revisions preserve historical selections','retired question drafts remain saveable','uncertain references have no dead practice action','anonymous write denial','origin restriction','server answer validation','account isolation','concurrent saves','immediate grading while response is pending','two answers continue during background sync','account-scoped unsynced drafts','durable retry deduplication','idempotent retry after lost response','continuous new questions without reshuffled rounds','no repetition before unseen questions exhausted','account-based restart skips practiced questions','explicit review after bank exhausted','shuffled A-D options keep their own explanations','four explanations and extension on every question','module scope remains stable','multiple payload validation','exact set grading and persisted selection','reversible selection before submit','missed and wrong option explanations','single/multi/mixed continuous scopes','viewport fixed Next action with safe-area clearance','Jilin direct course entry','Jilin official web evidence','Jilin regional continuous practice','Jilin searchable authored notes',...(chapter?['chapter reading position saved','chapter learned saved']:[])],chapters:study.curriculum.length,questions:study.questions.length},null,2));

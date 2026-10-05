@@ -1,0 +1,33 @@
+name: Publish Gongji study to GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Generate study content
+        run: python3 build.py
+      - name: Build static Pages portal
+        run: python3 scripts/build-pages.py
+      - name: Verify Pages artifact
+        run: node qa/verify-pages.mjs
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist-pages
+      - name: Publish
+        id: deployment
+        uses: actions/deploy-pages@v4

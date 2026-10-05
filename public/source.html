@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>资料出处 · 公基学习台</title><meta name="description" content="查看公基资料的提取文字及对应 PDF 页码。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23183254'/%3E%3Cpath d='M15 17h15q4 0 4 4v27q-3-3-7-3H15zM49 17H38q-4 0-4 4v27q3-3 7-3h8z' fill='%23fff'/%3E%3Cpath d='m20 29 4 4 7-8' fill='none' stroke='%2366dfaa' stroke-width='3'/%3E%3C/svg%3E">
+<style>
+:root{--ink:#172238;--muted:#576579;--line:#e1e7ef;--blue:#24599b;--bg:#f5f7fb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}a{color:var(--blue)}header{background:linear-gradient(125deg,#183254,#285f80);color:#fff;padding:24px 0}header a{color:#fff;text-decoration:none}header h1{font-size:clamp(23px,4vw,34px);margin:12px 0 2px;line-height:1.35}header p{margin:0;color:#dceaf3}.wrap{max-width:920px;margin:auto;padding:0 20px}main{padding-top:24px;padding-bottom:56px}.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:0 4px 18px #16395b08}.meta{color:var(--muted);font-size:14px}.pager{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;margin:18px 0}.pager a{display:inline-block;border:1px solid #b9c9dc;background:#fff;border-radius:9px;padding:7px 13px;text-decoration:none}.pager a:hover{background:#eaf2fd}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:15px/1.8 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;margin:20px 0 0}.note{font-size:13px;color:var(--muted);margin-top:18px}@media(max-width:600px){.wrap{padding:0 15px}.card{padding:16px}}
+</style></head><body><header><div class="wrap"><nav><a href="study.html">学习首页</a>　·　<a href="search.html">全文检索</a></nav><h1 id="title">资料出处</h1><p id="subtitle"></p></div></header><main class="wrap"><div class="pager"><a id="previous" hidden>← 上一页</a><a id="next" hidden>下一页 →</a></div><article class="card"><div class="meta" id="meta"></div><pre id="content"></pre><p class="note">本站展示的是提取文字，图片版资料可能有 OCR 识别误差。页码对应原 PDF 的文件页序；如需核对版式，请在本地原文件中打开相同页码。法律、政策和时政内容请以现行权威文件为准。</p></article></main><script src="data.js?v=c0bbf351f261"></script><script>
+const params=new URLSearchParams(location.search),sourceId=params.get('source'),pageNumber=Number(params.get('page'));
+const source=KB_DATA.sources.find(item=>item.id===sourceId);
+const row=KB_DATA.pages.find(item=>item.s===sourceId&&item.p===pageNumber);
+const valid=source&&Number.isInteger(pageNumber)&&pageNumber>=1&&pageNumber<=source.pages;
+if(valid){
+  const section=source.kind==='study-notes';
+  document.title=`${source.name} · 第 ${pageNumber} ${section?'节':'页'} · 公基学习台`;
+  document.getElementById('title').textContent=source.name;
+  document.getElementById('subtitle').textContent=`${section?'讲解':'PDF'} 第 ${pageNumber} / ${source.pages} ${section?'节':'页'}`;
+  if(section)document.querySelector('.note').textContent='本站原创学习讲解；打开吉林专题可查看官方来源、完整考点和配套练习。';
+  document.getElementById('meta').textContent=`提取方式：${source.method} · 来源：${source.edition||'用户提供资料'}`;
+  document.getElementById('content').textContent=row?.t?.trim()||'这一页没有可读取的文字。请在本地原 PDF 中核对。';
+  if(pageNumber>1){const a=document.getElementById('previous');a.hidden=false;a.href=`source.html?source=${encodeURIComponent(sourceId)}&page=${pageNumber-1}`}
+  if(pageNumber<source.pages){const a=document.getElementById('next');a.hidden=false;a.href=`source.html?source=${encodeURIComponent(sourceId)}&page=${pageNumber+1}`}
+}else{
+  document.getElementById('title').textContent='找不到资料页';
+  document.getElementById('content').textContent='来源或页码无效。请返回全文检索重新选择。';
+}
+</script></body></html>

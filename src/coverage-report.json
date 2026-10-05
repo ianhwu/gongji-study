@@ -1,0 +1,14 @@
+{
+  "modules": 13,
+  "knowledge_cards": 78,
+  "reading_chapters": 328,
+  "questions": 152,
+  "question_sources": {
+    "tricolor": 69,
+    "color": 23,
+    "mindmap": 20,
+    "top": 20,
+    "bottom": 20
+  },
+  "new_questions_with_page_evidence": 80
+}
