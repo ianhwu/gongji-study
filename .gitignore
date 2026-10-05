@@ -50,3 +50,5 @@ __pycache__/
 
 # Generated static GitHub Pages bundle
 /dist-pages/
+
+/output/

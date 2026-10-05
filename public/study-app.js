@@ -238,6 +238,7 @@ function show(view,scroll=true) {
   document.querySelectorAll('.view').forEach((el) => el.classList.toggle('active', el.id === view));
   document.querySelectorAll('.nav button[data-view]').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
   if (view === 'home') renderHome();
+  if (view === 'library') renderLibrary();
   if (view === 'wrong') renderWrong();
   if (view === 'quiz') showQuizSetup();
   if (view === 'tools') renderTools();
@@ -270,8 +271,10 @@ function courseChapters(moduleId) {
     (!query || chapter.title.includes(query) || moduleMap[chapter.module]?.title.includes(query)));
 }
 function openCourse(id) { openLesson(id); }
-function openCourses() {if(currentPoint)openPoint(currentPoint.id);else openLesson(currentModule);}
+function openCourses() {if(currentChapter){openChapter(currentChapter.id,chapterPage);return;}if(currentPoint)openPoint(currentPoint.id);else openLesson(currentModule);}
 function renderCourseDirectory() {
+ if(directoryMode==='books'){renderReadingDirectory();return;}
+ $('directoryTitle').textContent='学科目录';$('directorySubjects').classList.add('active');$('directoryBooks').classList.remove('active');$('courseSearch').placeholder='例如：合同、宪法、宏观经济';
  const box=$('courseDirectory'),query=$('courseSearch').value.trim();
  if(directoryQuery===query&&box.children.length){updateDirectorySelection();return;}
  const scrollTop=$('courseSidebar').scrollTop;captureDirectory();directoryQuery=query;
@@ -309,6 +312,7 @@ function updateDirectorySelection(){
  captureDirectory();saveCourseNavigation();
 }
 function locateCurrentPoint(){
+ if(directoryMode==='books'){for(const b of $('courseDirectory').children)if(b.dataset?.chapterId===currentChapter?.id)b.scrollIntoView({block:'nearest',behavior:'auto'});return;}
  const unit=directoryModules.get(currentModule);if(unit)unit.open=true;
  if(currentPoint){const group=directoryGroups.get(sectionKey(currentModule,pointGroup(currentPoint)));if(group)group.open=true;directoryPointButtons.get(currentPoint.id)?.scrollIntoView({block:'nearest',behavior:'auto'});}
  else unit?.scrollIntoView({block:'nearest',behavior:'auto'});
@@ -339,6 +343,7 @@ function renderLessonPoints(id) {
  for(const c of STUDY.curriculum.filter(c=>c.module===id))list.append(action(`${c.title} · ${sourceMap[c.source].name}`,()=>openChapter(c.id),'btn ghost'));if(id==='m14'){for(const s of STUDY.webSources){const a=el('a',s.name,'btn ghost');a.href=s.url;a.target='_blank';list.append(a);}}ref.append(list);box.append(ref);
 }
 function openPoint(id) {
+ if(directoryMode!=='subjects'){directoryQuery=null;readerDirectorySource=null;}directoryMode='subjects';
  const p=pointMap.get(id);if(!p)return;captureLessonSections();currentPoint=p;currentModule=p.module;currentChapter=null;
  $('moduleLesson').classList.add('hidden');$('chapterLesson').classList.add('hidden');$('pointLesson').classList.remove('hidden');
  const box=$('pointLesson');box.replaceChildren();const nav=el('nav',undefined,'point-navigation');nav.setAttribute('aria-label','考点阅读导航');const path=el('div',undefined,'point-path');path.append(action(moduleMap[p.module].title,()=>openLesson(p.module),'point-breadcrumb'),el('span',pointGroup(p),'point-path-group'),action('目录',()=>{$('courseSidebar').scrollIntoView({block:'start',behavior:'auto'});locateCurrentPoint();},'point-directory-return'));const controls=el('div',undefined,'point-navigation-actions');const points=modulePoints[p.module],index=points.findIndex(item=>item.id===p.id);const previous=action('上一考点',()=>openPoint(points[index-1].id),'btn ghost'),next=action('下一考点',()=>openPoint(points[index+1].id),'btn secondary');previous.disabled=index===0;next.disabled=index===points.length-1;controls.append(el('span',`${index+1} / ${points.length}`,'point-position'),previous,next);nav.append(path,controls);box.append(nav);box.append(el('span',moduleMap[p.module].title,'badge'),el('h2',p.title),el('p',p.statement,'thesis'));
@@ -370,6 +375,7 @@ function renderUnitPicker() {
 }
 
 function openLesson(id) {
+  if(directoryMode!=='subjects'){directoryQuery=null;readerDirectorySource=null;}directoryMode='subjects';
   currentModule = id; currentChapter = null; currentPoint = null; const module = moduleMap[id];
   $('pointLesson').classList.add('hidden'); renderGuide(id); renderLessonPoints(id); renderModuleVisuals(id);
   $('moduleLesson').classList.remove('hidden'); $('chapterLesson').classList.add('hidden');
@@ -405,16 +411,20 @@ function openLesson(id) {
 }
 
 async function openChapter(id, page) {
-  currentChapter = chapterMap[id]; if (!currentChapter) return; currentPoint=null; $('pointLesson').classList.add('hidden');
+  const candidate=chapterMap[id];
+  if(candidate?.isBook){const chapters=readingChapters(candidate.source);const target=chapters.find(c=>page>=c.start&&page<=c.end)||chapters[0];if(target)return openChapter(target.id,page&&page>=target.start?page:undefined);}
+  currentChapter = candidate; if (!currentChapter) return;
+  directoryMode='books';readingSource=currentChapter.source; currentPoint=null; $('pointLesson').classList.add('hidden');
   if (!currentChapter.isBook) currentModule = currentChapter.module;
   if ($('courseBook').value !== 'all') $('courseBook').value = currentChapter.source;
   chapterPage = Math.max(currentChapter.start, Math.min(currentChapter.end, page || state.reading?.[id]?.page || currentChapter.start));
   $('moduleLesson').classList.add('hidden'); $('chapterLesson').classList.remove('hidden');
   renderChapter(); renderCourseDirectory(); showCourseContent('chapterLesson');
-  const requested=currentChapter.id;try{await loadSource(currentChapter.source);if(currentChapter?.id===requested)renderChapter();}catch{if(currentChapter?.id===requested)$('chapterText').textContent='资料暂时加载失败，请重新打开本章重试。';}
+  const requested=currentChapter.id;try{await Promise.all([loadSource(currentChapter.source),loadEdition(currentChapter.source)]);if(currentChapter?.id===requested)renderChapter();}catch{if(currentChapter?.id===requested){$('chapterText').textContent='资料暂时加载失败，请重新打开本章重试。';$('chapterBody').replaceChildren(el('p','学习版暂时加载失败，请重新打开本章重试。'));}}
 }
 function renderChapter() {
   const chapter = currentChapter;
+  renderReadingChapter(chapter);
   $('chapterTitle').textContent = chapter.title;
   const topics = $('chapterTopics'); topics.replaceChildren();
   for (const topic of chapter.topics || []) { const button = document.createElement('button'); button.textContent = topic.title + ' · 第 ' + topic.page + ' 页'; button.onclick = () => { openChapter(chapter.id, topic.page); $('chapterText').scrollIntoView({behavior:'smooth'}); }; topics.append(button); }
@@ -443,7 +453,7 @@ function renderChapter() {
 async function turnChapterPage(delta) {
   if (!currentChapter) return;
   const chapter = currentChapter, page = Math.max(chapter.start, Math.min(chapter.end, chapterPage + delta));
-  chapterPage = page; renderChapter();
+  chapterPage = page; renderChapter(); $('chapterBody').scrollIntoView({behavior:'auto',block:'start'});
   if (signedIn && accountReady) {
     try { await persist({ type:'read', chapterId:chapter.id, page }); }
     catch (error) { notice('阅读位置未同步：' + error.message); }
@@ -644,13 +654,13 @@ $('courseSearch').oninput = renderCourseDirectory;
 $('locateCurrentPoint').onclick=()=>{if($('courseSearch').value){$('courseSearch').value='';renderCourseDirectory();}locateCurrentPoint();};
 for (const source of STUDY.sources) { const option = document.createElement('option'); option.value = source.id; option.textContent = source.name; $('courseBook').append(option); }
 $('courseBook').value = 'all';
-$('courseBook').onchange = () => {};
-$('fullBook').onclick = () => { const source = $('courseBook').value !== 'all' ? $('courseBook').value : currentChapter?.source || 'top'; openChapter('book-' + source); };
+$('courseBook').onchange = () => {if($('courseBook').value!=='all')openReadingBook($('courseBook').value);};
+$('fullBook').onclick = () => { const source = $('courseBook').value !== 'all' ? $('courseBook').value : currentChapter?.source || 'top'; return openReadingBook(source); };
 $('chapterJump').onclick = async () => {
   const page = Number($('chapterPageInput').value), source = currentChapter?.source;
   if (!source || !Number.isInteger(page) || page < 1 || page > sourceMap[source].pages) { notice('请输入这份 PDF 范围内的整数页码。'); return; }
   const chapter = STUDY.curriculum.find((item) => item.source === source && item.start <= page && item.end >= page) || chapterMap['book-' + source];
-  openChapter(chapter.id, page);
+  await openChapter(chapter.id, page);
   if (signedIn && accountReady) { try { await persist({type:'read',chapterId:chapter.id,page}); } catch(error) { notice('阅读位置未同步：' + error.message); } }
 };
 let refreshInFlight = false;
@@ -678,5 +688,107 @@ $('coverageSearch').oninput=()=>{coverageLimit=60;renderCoverage();};
 $('coverageMore').onclick=()=>{coverageLimit+=60;renderCoverage();};
 $('coveragePractice').onclick=()=>{const ids=new Set(filteredPoints().map(p=>p.id));startQuiz(STUDY.questions.filter(q=>q.pointIds.some(id=>ids.has(id))));};
 $('jilinEntry').onclick=()=>openLesson('m14');
+$('homeReading').onclick=()=>show('library');
+$('readerLibrary').onclick=()=>show('library');
+$('readerFont').onclick=()=>{readingPreferences.large=!readingPreferences.large;saveReadingPreferences();applyReadingPreferences();};
+$('readerPaper').onclick=()=>{readingPreferences.paper=!readingPreferences.paper;saveReadingPreferences();applyReadingPreferences();};
+$('readerPreviousChapter').onclick=()=>moveReadingChapter(-1);
+$('readerNextChapter').onclick=()=>moveReadingChapter(1);
+$('directorySubjects').onclick=()=>{directoryMode='subjects';directoryQuery=null;$('courseSearch').value='';renderCourseDirectory();};
+$('directoryBooks').onclick=()=>{directoryMode='books';readerDirectorySource=null;$('courseSearch').value='';renderCourseDirectory();};
+const editionPageMap=new Map(),loadedEditions=new Map();
+let readerGuideId=null,readerBodyKey=null,readerDirectorySource=null,readerDirectoryQuery=null;
+let directoryMode='subjects',readingSource='top';
+const READING_KEY='gongji-reading-preferences-v1';
+let readingPreferences={large:false,paper:false,recent:{}};
+try{readingPreferences={...readingPreferences,...JSON.parse(localStorage.getItem(READING_KEY)||'{}')};}catch{}
+function saveReadingPreferences(){try{localStorage.setItem(READING_KEY,JSON.stringify(readingPreferences));}catch{}}
+function applyReadingPreferences(){
+ $('lesson').classList.toggle('reader-large',!!readingPreferences.large);$('lesson').classList.toggle('reader-paper',!!readingPreferences.paper);
+ $('readerFont').textContent=readingPreferences.large?'标准字号':'大字阅读';$('readerFont').setAttribute('aria-pressed',String(!!readingPreferences.large));
+ $('readerPaper').textContent=readingPreferences.paper?'白色底色':'护眼底色';$('readerPaper').setAttribute('aria-pressed',String(!!readingPreferences.paper));
+}
+async function loadEdition(source){
+ if(!loadedEditions.has(source))loadedEditions.set(source,fetch('editions/'+source+'.json?v='+STUDY.contentVersion).then(r=>{if(!r.ok)throw new Error('reading unavailable');return r.json();}).then(rows=>{for(const row of rows)editionPageMap.set(source+':'+row.p,row.blocks);}).catch(e=>{loadedEditions.delete(source);throw e;}));
+ return loadedEditions.get(source);
+}
+const bookDescriptions={top:'民法、刑法、法理与宪法、行政与诉讼、劳动与事业单位、哲学、党史和政治理论。',bottom:'经济、公文、管理、历史、文学、古代文化、科技、生活常识与天文地理。',tricolor:'五大学科板块，用于知识复盘和查漏；可与详细笔记对照阅读。',color:'覆盖法律、政治、经济与常识等内容，按知识章节阅读与查找。',mindmap:'用框架建立联系；阅读前先看结构，阅读后用空白框架主动回忆。'};
+function readingChapters(source){return STUDY.curriculum.filter(c=>c.source===source);}
+function openReadingBook(source){
+ const chapters=readingChapters(source),last=readingPreferences.recent[source];
+ const saved=last&&chapters.find(c=>c.id===last.chapter);
+ const account=chapters.filter(c=>state.reading?.[c.id]).sort((a,b)=>(state.reading[b.id].at||0)-(state.reading[a.id].at||0))[0];
+ const selected=saved||account||chapters[0];if(selected)return openChapter(selected.id,saved?last.page:undefined);
+}
+function renderLibrary(){
+ const box=$('bookLibrary');box.replaceChildren();
+ for(const source of ['top','bottom','tricolor','color','mindmap'].map(id=>sourceMap[id]).filter(Boolean)){
+  const chapters=readingChapters(source.id),card=el('article',undefined,'book-card');const cover=el('div',undefined,'book-cover');cover.setAttribute('aria-hidden','true');cover.append(el('small','PUBLIC KNOWLEDGE'),el('span',source.id==='top'?'学霸\n上册':source.id==='bottom'?'学霸\n下册':source.id==='mindmap'?'思维\n导图':source.id==='tricolor'?'三色\n笔记':'彩色\n笔记'));card.append(cover);
+  const text=el('div');text.append(el('h3',source.name),el('p',`${chapters.length} 章 · ${source.pages} 页纳入阅读`,'book-meta'),el('p',bookDescriptions[source.id],'book-description'));
+  const authored=chapters.filter(c=>STUDY.readingEdition[c.id]?.authored).length;text.append(el('p',authored?`${authored} 章独立导读 · 易混提醒 · 合上资料自测`:'章节框架 · 考点对读 · 回忆提示'));
+  const last=readingPreferences.recent[source.id];if(last)text.append(el('p',`上次读到：${chapterMap[last.chapter]?.title||''} · 第 ${last.page} 页`,'reader-current'));
+  const controls=el('div',undefined,'actions');controls.append(action(last?'继续阅读':'开始阅读',()=>openReadingBook(source.id),'btn'),action('查看目录',()=>{readingSource=source.id;directoryMode='books';readerDirectorySource=null;openChapter(chapters[0].id);},'btn secondary'));if(['top','bottom'].includes(source.id)){const download=el('a','下载学习版 PDF','btn ghost');download.href='downloads/'+source.id+'-study.pdf';download.setAttribute('download',source.id==='top'?'公基学霸笔记-上册-学习版.pdf':'公基学霸笔记-下册-学习版.pdf');controls.append(download);}text.append(controls);card.append(text);box.append(card);
+ }
+}
+function readingPart(chapter){
+ const boundaries=chapter.source==='top'?[[9,'法律 · 民法'],[82,'法律 · 刑法'],[125,'法律 · 法理学'],[147,'法律 · 宪法'],[180,'法律 · 行政法'],[219,'法律 · 诉讼法'],[237,'法律 · 劳动与劳动合同'],[247,'事业单位相关法'],[253,'马克思主义与哲学'],[335,'毛泽东思想与党史'],[373,'中国特色社会主义理论']]:chapter.source==='bottom'?[[9,'经济'],[59,'公文'],[93,'管理'],[109,'历史'],[156,'文学'],[195,'古代文化'],[235,'科技与生活常识'],[291,'天文与地理']]:[];
+ return boundaries.filter(([page])=>chapter.start>=page).at(-1)?.[1]||moduleMap[chapter.module]?.title||'章节';
+}
+function renderReadingDirectory(){
+ const box=$('courseDirectory'),query=$('courseSearch').value.trim(),source=currentChapter?.source||readingSource;
+ $('directoryTitle').textContent='资料目录';$('directorySubjects').classList.remove('active');$('directoryBooks').classList.add('active');
+ $('courseSearch').placeholder='查找本书章节或知识点';
+ const chapters=readingChapters(source);$('courseDirectoryMeta').textContent=`${source==='top'?'学霸上册':source==='bottom'?'学霸下册':sourceMap[source].name} · ${chapters.length} 章`;
+ if(readerDirectorySource!==source||readerDirectoryQuery!==query){
+  const top=$('courseSidebar').scrollTop;box.replaceChildren();readerDirectorySource=source;readerDirectoryQuery=query;directoryQuery=null;
+  const picker=el('div',undefined,'book-selector');for(const id of ['top','bottom','tricolor','color','mindmap'])picker.append(action(id==='top'?'学霸上':id==='bottom'?'学霸下':id==='tricolor'?'三色':id==='color'?'彩色':'导图',()=>{readingSource=id;$('courseSearch').value='';openReadingBook(id);},id===source?'current':''));box.append(picker);
+  let group=null,count=0;
+  for(const c of chapters){if(query&&!`${c.title} ${(c.topics||[]).map(t=>t.title).join(' ')}`.includes(query))continue;const part=readingPart(c);if(part!==group){box.append(el('h3',part,'book-directory-heading'));group=part;}
+   const button=action(c.title,()=>openChapter(c.id),'book-chapter-button');button.dataset.chapterId=c.id;button.append(el('span',`${c.start}–${c.end}`));box.append(button);count++;
+  }
+  if(!count)box.append(el('p','本书没有匹配章节，请换关键词。','muted'));$('courseSidebar').scrollTop=top;
+ }
+ for(const button of box.children)if(button.dataset?.chapterId){const selected=button.dataset.chapterId===currentChapter?.id;button.classList.toggle('current',selected);if(selected)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');}
+}
+function readerCompare(table){
+ const scroll=el('div',undefined,'table-scroll'),node=el('table',undefined,'compare-table reader-compare'),head=el('thead'),tr=el('tr');for(const cell of table.headers)tr.append(el('th',cell));head.append(tr);node.append(head);const body=el('tbody');for(const row of table.rows){const r=el('tr');for(const cell of row)r.append(el('td',cell));body.append(r);}node.append(body);scroll.append(node);return scroll;
+}
+function renderReadingChapter(chapter){
+ const guide=STUDY.readingEdition[chapter.id],box=$('chapterGuide');
+ if(readerGuideId!==chapter.id){
+  readerGuideId=chapter.id;box.replaceChildren();$('chapterReview').replaceChildren();
+  if(guide){
+   box.append(el('p',guide.thesis,'reader-thesis'),el('h3','怎么读这一章'),el('p',guide.route,'reader-route'));
+   const trap=el('div',undefined,'reader-trap');trap.append(el('b','容易混淆'),el('span',guide.trap));box.append(trap);
+   if(guide.table){box.append(el('h3',guide.table.title),readerCompare(guide.table));if(guide.table.url){const cite=el('p',undefined,'reader-source-note');const link=el('a',guide.table.sourceTitle);link.href=guide.table.url;link.target='_blank';link.rel='noopener';cite.append(link);box.append(cite);}}
+   if(guide.case){box.append(el('h3','用一个情境想清楚'));const example=el('details',undefined,'reading-detail');example.append(el('summary',guide.case[0]),el('p',guide.case[1],'recall-answer'));box.append(example);}
+   const points=guide.pointIds.map(id=>pointMap.get(id)).filter(Boolean),useful=points.filter(p=>p.explanation||p.statement);
+   if(useful.length){const detail=el('details',undefined,'reading-detail');detail.append(el('summary',`本章考点对读 · ${useful.length} 个`));for(const p of useful){const item=el('section',undefined,'reader-point');item.append(el('h4',p.title),el('p',p.explanation||p.statement),action('查看讲解与练习',()=>openPoint(p.id),'btn ghost'));detail.append(item);}box.append(detail);}
+   const review=$('chapterReview');review.append(el('h3','合上资料，检验理解'));const recall=el('details');recall.append(el('summary',guide.recall));recall.append(el('p','回看线索：'+guide.thesis+' '+guide.trap,'recall-answer'));review.append(recall,el('p','先口头回答，再展开线索；解释一个例子，最后补一个反例。','muted small'));
+  }
+ }
+ const body=$('chapterBody'),key=chapter.source+':'+chapterPage,blocks=editionPageMap.get(key);
+ if(readerBodyKey!==key||(!body.dataset.ready&&blocks)){
+  readerBodyKey=key;body.dataset.ready=blocks?'yes':'';body.replaceChildren();body.append(el('div',`正文 · PDF 第 ${chapterPage} 页`,'reading-page-label'));
+  if(!blocks)body.append(el('p',loadedEditions.has(chapter.source)?'正在整理本页内容…':'正在加载学习版…','muted'));
+  else if(!blocks.length)body.append(el('p','此页没有可读取文字，请核对原 PDF。','muted'));
+  else{
+   let labels=null;
+   for(const block of blocks){
+    // Short, adjacent diagram labels stay as labels, without inventing arrows.
+    if(block.type==='paragraph'&&block.text.length<=13&&!/[。；：:]$/.test(block.text)){if(!labels){labels=el('div',undefined,'reading-labels');body.append(labels);}labels.append(el('span',block.text));continue;}
+    labels=null;body.append(el(block.type==='heading'?'h3':'p',block.text,block.type==='note'?'reading-note':block.type==='item'?'reading-item':''));
+   }
+  }
+ }
+ const chapters=readingChapters(chapter.source),index=chapters.findIndex(c=>c.id===chapter.id);
+ $('readerPosition').textContent=`第 ${index+1} / ${chapters.length} 章 · 本章 ${chapterPage-chapter.start+1} / ${chapter.end-chapter.start+1} 页`;
+ $('readerPreviousChapter').disabled=index<=0;$('readerNextChapter').disabled=index<0||index>=chapters.length-1;
+ readingPreferences.recent[chapter.source]={chapter:chapter.id,page:chapterPage};saveReadingPreferences();applyReadingPreferences();
+}
+function moveReadingChapter(delta){const chapters=readingChapters(currentChapter?.source||readingSource),index=chapters.findIndex(c=>c.id===currentChapter?.id),target=chapters[index+delta];if(target)openChapter(target.id);}
+
 renderHome(); loadAccount();
 const initialModule=new URLSearchParams(window.location.search||'').get('module');if(moduleMap[initialModule])openLesson(initialModule);
+
+const readingParams=new URLSearchParams(window.location.search||'');if(readingParams.get('view')==='library')show('library');else if(chapterMap[readingParams.get('chapter')])openChapter(readingParams.get('chapter'),Number(readingParams.get('page'))||undefined);

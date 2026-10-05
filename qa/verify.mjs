@@ -86,13 +86,13 @@ class Element {
 }
 const elements=new Map();
 const $=id=>{if(!elements.has(id)) elements.set(id,new Element(id)); return elements.get(id)};
-const views=['home','lesson','quiz','wrong','tools','coverage'].map($);
-const nav=['home','lesson','quiz','wrong','tools','coverage'].map(view=>{const e=new Element();e.dataset.view=view;return e});
+const views=['home','lesson','quiz','wrong','tools','coverage','library'].map($);
+const nav=['home','lesson','quiz','wrong','tools','coverage','library'].map(view=>{const e=new Element();e.dataset.view=view;return e});
 const document={getElementById:$,createElement:tag=>{const e=new Element();e.tag=tag;return e},createTextNode:text=>({textContent:text}),querySelectorAll:selector=>selector==='.view'?views:nav};
 let loseResponse=false,delayAnswer=false,releaseAnswer;const drafts=new Map();
 const context=vm.createContext({document,window:{location:{search:'?module=m14'},scrollTo(){},addEventListener(){}},localStorage:{getItem:k=>drafts.get(k)||null,setItem:(k,v)=>drafts.set(k,v),removeItem:k=>drafts.delete(k)},crypto:webcrypto,URLSearchParams,Date,Math,Map,JSON,console,setTimeout,clearTimeout,
   fetch:async(url,options={})=>{
-    if(url.startsWith('references/'))return Response.json(JSON.parse(fs.readFileSync('public/'+url.split('?')[0],'utf8')));
+    if(url.startsWith('references/')||url.startsWith('editions/'))return Response.json(JSON.parse(fs.readFileSync('public/'+url.split('?')[0],'utf8')));
     if (options.method==='POST') {if(delayAnswer){delayAnswer=false;await new Promise(resolve=>releaseAnswer=resolve);}const response=await api.api.POST(request(JSON.parse(options.body)));if(loseResponse){loseResponse=false;throw new Error('network response lost')}return response;}
     return api.api.GET();
   }});
@@ -168,12 +168,12 @@ vm.runInContext('currentChapter = null;currentPoint=null',context);courseButton.
 $('chapterOverview').onclick();assert($('lessonCards').children.length>0,'knowledge overview is available');
 for (const chapter of study.curriculum) {
  await vm.runInContext(`openChapter('${chapter.id}')`,context);
- assert($('chapterText').textContent.length>0, chapter.id+' renders text or explicit OCR empty state');
+ assert($('chapterText').textContent.length>0, chapter.id+' renders text or explicit OCR empty state');assert($('chapterBody').children.length>1,chapter.id+' has readable content');assert($('chapterGuide').children.length>3,chapter.id+' has chapter teaching');
 }
 $('courseSearch').value='合同';vm.runInContext('renderCourseDirectory()',context);assert(vm.runInContext('courseChapters().length',context)>0);
 $('courseSearch').value='不存在的测试章节';vm.runInContext('renderCourseDirectory()',context);assert.equal(vm.runInContext('courseChapters().length',context),0);
 $('courseSearch').value='';$('courseBook').value='bottom';
-await $('fullBook').onclick();assert.equal(vm.runInContext('currentChapter.isBook',context),true);
+await $('fullBook').onclick();assert.equal(vm.runInContext('currentChapter.source',context),'bottom');assert.equal(vm.runInContext('currentChapter.isBook',context),undefined,'book opens chapter learning edition rather than front matter');
 $('chapterPageInput').value='314';await $('chapterJump').onclick();assert.equal(vm.runInContext('chapterPage',context),314);
 assert.equal(JSON.parse(rows.get('frontend-test').state_json).reading[vm.runInContext('currentChapter.id',context)].page,314);
 assert($('accountEntry').textContent.includes('账号'));
@@ -367,3 +367,20 @@ assert(!$('submitAnswer').disabled);assert(!$('feedback').children.length);asser
 const html=fs.readFileSync('public/study.html','utf8');assert(/\.answer-dock\{position:fixed;inset:auto 0 0/.test(html),'dock anchored to viewport bottom');assert(html.includes('env(safe-area-inset-bottom)'));assert(html.includes('#quizPlay{padding-bottom:150px'),'long explanations have dock clearance');assert(html.includes('aria-label="答题操作"'));assert(html.includes('id="submitAnswer"'));assert(html.indexOf('id="nextQuestion"')>html.indexOf('class="answer-dock"'),'Next lives in dock');const code=fs.readFileSync('public/study-app.js','utf8');for(const m of code.matchAll(/\$\('([^']+)'\)/g))assert(html.includes('id="'+m[1]+'"'),m[1]+' exists');
 
 console.log(JSON.stringify({status:'passed',checks:['previous restores choices order and feedback without duplicate writes','forward returns to unfinished question and keeps multi draft','practice continues after history and resets on new scope','expanded verified licensed images and valid point associations','module image gallery and point jump','lazy image loading and source fallback','answer images shown only after grading','directory branches and scroll survive point/unit navigation','overview disclosure state restored','search does not overwrite collapsed branches','previous/next point navigation','unit selector stays open until explicit dismissal','question revisions preserve historical selections','retired question drafts remain saveable','uncertain references have no dead practice action','anonymous write denial','origin restriction','server answer validation','account isolation','concurrent saves','immediate grading while response is pending','two answers continue during background sync','account-scoped unsynced drafts','durable retry deduplication','idempotent retry after lost response','continuous new questions without reshuffled rounds','no repetition before unseen questions exhausted','account-based restart skips practiced questions','explicit review after bank exhausted','shuffled A-D options keep their own explanations','four explanations and extension on every question','module scope remains stable','multiple payload validation','exact set grading and persisted selection','reversible selection before submit','missed and wrong option explanations','single/multi/mixed continuous scopes','viewport fixed Next action with safe-area clearance','Jilin direct course entry','Jilin official web evidence','Jilin regional continuous practice','Jilin searchable authored notes',...(chapter?['chapter reading position saved','chapter learned saved']:[])],chapters:study.curriculum.length,questions:study.questions.length},null,2));
+
+// Reading edition integrity and navigation, including account and local preferences.
+vm.runInContext("show('library')",context);assert.equal($('bookLibrary').children.length,5);
+const edition=vm.runInContext('STUDY.readingEdition',context);
+assert.equal(Object.keys(edition).length,study.curriculum.length);
+assert.equal(study.curriculum.filter(c=>['top','bottom'].includes(c.source)&&edition[c.id].authored).length,118);
+for(const c of study.curriculum){assert(c.start<=c.end);assert(edition[c.id].thesis&&edition[c.id].route&&edition[c.id].trap&&edition[c.id].recall);for(const id of edition[c.id].pointIds){const p=study.knowledge.find(p=>p.id===id);assert(p.source===c.source&&p.page>=c.start&&p.page<=c.end);}}
+for(const source of study.sources){const rows=JSON.parse(fs.readFileSync('public/editions/'+source.id+'.json','utf8')),original=active.pages.filter(p=>p.s===source.id);assert.equal(rows.length,original.length,'all included PDF pages retain reading access');assert(rows.every(r=>r.blocks.every(b=>!/(微信公众号|售后微信|biguo25)/.test(b.text))));}
+await vm.runInContext("openChapter('chapter-top-12')",context);assert.equal(vm.runInContext('chapterPage',context),11,'corrected top book PDF offset');assert.equal(vm.runInContext('directoryMode',context),'books');
+const directory=$('courseDirectory');const currentButtons=directory.children.filter(b=>b.dataset?.chapterId);assert.equal(currentButtons.length,62);
+const stable=directory.children[2];await vm.runInContext("openChapter('chapter-top-31')",context);assert.equal(directory.children[2],stable,'book directory remains mounted across chapter clicks');
+await vm.runInContext('turnChapterPage(1)',context);const page=vm.runInContext('chapterPage',context);assert.equal(page,31);
+$('readerFont').onclick();assert($('lesson').className.includes('reader-large'));$('readerPaper').onclick();assert($('lesson').className.includes('reader-paper'));
+assert(JSON.parse(drafts.get('gongji-reading-preferences-v1')).recent.top.page===page);
+$('directorySubjects').onclick();assert.equal(vm.runInContext('directoryMode',context),'subjects');
+assert($('courseDirectory').children.length>0);
+console.log('Reading edition passed: 321 chapters, 118 independent book guides, all source pages, corrected offsets, persistent directory and preferences.');

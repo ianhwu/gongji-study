@@ -7,9 +7,9 @@ def book(source, offset, last, rows):
         parsed.append((int(page) + offset, module, title))
     for i, (start, module, title) in enumerate(parsed):
         end = parsed[i + 1][0] - 1 if i + 1 < len(parsed) else last
-        CURRICULUM.append(dict(id=f'chapter-{source}-{start}',source=source,start=start,end=end,module=module,title=title))
+        CURRICULUM.append(dict(id=f'chapter-{source}-{start + (1 if source == "top" else 0)}',source=source,start=start,end=end,module=module,title=title))
 
-book('top', 7, 430, '''
+book('top', 6, 430, '''
 3|m02|民法章节框架
 5|m02|民法总则
 24|m02|物权

@@ -26,11 +26,18 @@ def js_literal(value):
 
 pages = json.loads((SRC / "active-data.json").read_text(encoding="utf-8"))
 study = json.loads((SRC / "learning.json").read_text(encoding="utf-8"))
+import sys
+sys.path.insert(0,str(SRC))
+from reading_edition import compile_editions
+study["readingEdition"], editions = compile_editions(study,pages)
+(DIST / "editions").mkdir(exist_ok=True)
+for source, rows in editions.items():
+    (DIST / "editions" / (source+".json")).write_text(json.dumps(rows,ensure_ascii=False,separators=(",",":")),encoding="utf-8")
 pdf_page_count=len(pages['pages'])
 pages['sources'].append(dict(id='jilin-notes',name='吉林省情讲解',pages=len(study['regionalPages']),method='原创整理 · 官方核对',edition='2026-10-05核对',uri='study.html?module=m14',kind='study-notes'))
 pages['pages']+=study['regionalPages']
 study["visualReferences"] = json.loads((SRC / "visual-references.json").read_text(encoding="utf-8"))
-study["contentVersion"] = hashlib.sha256(js_literal(pages).encode()).hexdigest()[:12]
+study["contentVersion"] = hashlib.sha256((js_literal(pages)+js_literal(study["readingEdition"])+js_literal(editions)).encode()).hexdigest()[:12]
 (DIST / "references").mkdir(exist_ok=True)
 for source in pages["sources"]:
     rows = [{"p":p["p"],"t":p["t"]} for p in pages["pages"] if p["s"]==source["id"]]
