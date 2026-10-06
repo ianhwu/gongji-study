@@ -18,8 +18,8 @@ let currentPoint = null, selectedTimeline = 'history', coverageLimit = 60;
 const NAV_KEY='gongji-course-navigation-v1';
 let courseNavigation={open:{}};
 try {const saved=JSON.parse(localStorage.getItem(NAV_KEY)||'{}');if(saved.open&&typeof saved.open==='object')courseNavigation.open=saved.open;} catch {}
-const directoryModules=new Map(),directoryGroups=new Map(),directoryPointButtons=new Map();
-let directoryQuery=null,previousDirectoryPoint=null,previousDirectoryModule=null;
+const directoryModules=new Map(),directoryGroups=new Map(),directoryPointButtons=new Map(),directoryTopicButtons=new Map();
+let directoryQuery=null,previousDirectoryPoint=null,previousDirectoryModule=null,previousDirectoryTopic=null;
 const sectionKey=(id,title)=>JSON.stringify([id,title]);
 function saveCourseNavigation(){try{localStorage.setItem(NAV_KEY,JSON.stringify(courseNavigation));}catch{}}
 function rememberDisclosure(node,key,fallback=false,transient=false){
@@ -33,7 +33,8 @@ function captureDirectory(){
 function captureLessonSections(){
  for(const node of $('lessonPoints').children)if(node.dataset.navigationKey)courseNavigation.open[node.dataset.navigationKey]=node.open;
 }
-function pointGroup(p){return p.group||chapterMap[p.chapters[0]]?.title||'核心辨析与应用';}
+function pointGroup(p){return topicMap.get(STUDY.pointTopics?.[p.id])?.title||'专题讲解';}
+const moduleTopics=id=>[...topicMap.values()].filter(t=>t.module===id&&t.pointIds.length&&!t.overviewOnly);
 const questionAttempt = q => {const a=state.attempts[q.id];return a && (!q.revision || a.lastQuestionRevision===q.revision) ? a : undefined;};
 const pointDone = p => p.questionIds.some(id=>questionMap.has(id)&&questionAttempt(questionMap.get(id))?.count);
 const pointCorrect = p => p.questionIds.some(id=>questionMap.has(id)&&questionAttempt(questionMap.get(id))?.lastCorrect);
@@ -69,14 +70,16 @@ function topicDiagram(t){
 }
 function topicExpansion(t,{excludeVisualIds=[],full=false}={}){
  const section=el('section',undefined,'topic-expansion');section.dataset.topicId=t.id;
- section.append(el('p','相关知识拓展','topic-eyebrow'),el(full?'h2':'h3',t.title),el('p',t.overview),topicDiagram(t));
+ section.append(el('p',full?'专题课程':'本题关联专题','topic-eyebrow'),el(full?'h2':'h3',t.title),el('p',t.overview),topicDiagram(t));
+ for(const g of t.foundations||[])section.append(foundationGuide(g));
  section.append(el('h4','把知识连起来'),el('p',t.connection),el('h4','易混点与适用边界'),el('p',t.boundary),el('h4','换个条件怎么考'),el('p',t.variant));
  const pictures=t.visualIds.map(id=>visualReferences.find(v=>v.id===id)).filter(v=>v&&!excludeVisualIds.includes(v.id));
  if(pictures.length){section.append(el('h4','图片与知识对照'),visualGallery(pictures.slice(0,4)));if(pictures.length>4){const more=el('details',undefined,'reading-detail');more.append(el('summary',`再看 ${pictures.length-4} 张相关图片`),visualGallery(pictures.slice(4)));section.append(more);}}
  if(t.sourceFigures?.length){const originals=el('details',undefined,'reading-detail');originals.append(el('summary','对照学霸笔记中的相关原页图表'));for(const info of t.sourceFigures)originals.append(sourcePageFigure(info,referenceLabel(info.source,info.page)+' · 相关章节图表'));section.append(originals);}
  const recall=el('details',undefined,'reading-detail topic-recall');recall.append(el('summary','合上解析，试着复述这组知识'),el('p',t.recall));section.append(recall);
  const related=t.pointIds.map(id=>pointMap.get(id)).filter(p=>p&&p.status!=='needs-review');
- if(related.length){const links=el('details',undefined,'reading-detail');links.append(el('summary',`继续学这组知识 · ${related.length} 个考点`));const list=el('div',undefined,'topic-point-list');for(const p of related)list.append(action(p.title,()=>openPoint(p.id),'point-link'));links.append(list);section.append(links);}
+ if(full&&related.length){section.append(el('h3','考点讲解与应用'));for(let i=0;i<related.length;i+=10){const part=el('details',undefined,'reading-detail lesson-facts');part.open=i===0;part.append(el('summary',`考点讲解 ${i+1}–${Math.min(i+10,related.length)} · ${related.slice(i,i+10).map(p=>p.title).slice(0,3).join('、')}`));for(const p of related.slice(i,i+10)){const article=el('article',undefined,'lesson-fact');article.append(el('h4',p.title),el('p',p.statement));if(p.studyGuide)article.append(conceptGuide(p.studyGuide));else if(p.reasoning)article.append(el('p',p.reasoning,'muted'));const controls=el('div',undefined,'actions');controls.append(action('查看考点与出处',()=>openPoint(p.id),'btn ghost'));if(p.questionIds.length)controls.append(action('练习应用',()=>startQuiz(p.questionIds.map(id=>questionMap.get(id)).filter(Boolean)),'btn secondary'));article.append(controls);part.append(article);}section.append(part);}}
+ if(!full&&related.length){const links=el('details',undefined,'reading-detail');links.append(el('summary',`继续学这组知识 · ${related.length} 个考点`));const list=el('div',undefined,'topic-point-list');for(const p of related)list.append(action(p.title,()=>openPoint(p.id),'point-link'));links.append(list);section.append(links);}
  const sources=el('details',undefined,'reading-detail topic-sources');sources.append(el('summary','整理依据与资料出处'));sources.append(el('p','知识框架、关系说明、变式考法由本站整理；以下资料可用于对读。','muted'));
  for(const ref of t.refs){const link=el('a',referenceLabel(ref.source,ref.page));link.href=sourceLink(ref.source,ref.page);link.target='_blank';link.rel='noopener';sources.append(el('p'),link);}
  for(const [index,url] of t.authorities.entries()){const link=el('a','权威依据 '+(index+1)+' ↗');link.href=url;link.target='_blank';link.rel='noopener';sources.append(el('p'),link);}section.append(sources);
@@ -405,32 +408,34 @@ function openCourse(id) { openLesson(id); }
 function openCourses() {if(currentChapter){openChapter(currentChapter.id,chapterPage);return;}if(currentTopic){openTopic(currentTopic.id);return;}if(currentPoint)openPoint(currentPoint.id);else openLesson(currentModule);}
 function renderCourseDirectory() {
  if(directoryMode==='books'){renderReadingDirectory();return;}
- $('directoryTitle').textContent='学科目录';$('directorySubjects').classList.add('active');$('directoryBooks').classList.remove('active');$('courseSearch').placeholder='例如：合同、宪法、宏观经济';
+ $('directoryTitle').textContent='学科 · 模块 · 专题';$('directorySubjects').classList.add('active');$('directoryBooks').classList.remove('active');$('courseSearch').placeholder='搜索专题或考点，如四项基本原则';
  const box=$('courseDirectory'),query=$('courseSearch').value.trim();
  if(directoryQuery===query&&box.children.length){updateDirectorySelection();return;}
  const scrollTop=$('courseSidebar').scrollTop;captureDirectory();directoryQuery=query;
- box.replaceChildren();directoryModules.clear();directoryGroups.clear();directoryPointButtons.clear();
+ box.replaceChildren();directoryModules.clear();directoryGroups.clear();directoryPointButtons.clear();directoryTopicButtons.clear();
  let matches=0;
  for(const [subject,ids] of SUBJECTS){
-  const matched=ids.filter(id=>!query||moduleMap[id].title.includes(query)||modulePoints[id].some(p=>p.title.includes(query)||p.statement.includes(query)));
+  const matched=ids.filter(id=>!query||moduleMap[id].title.includes(query)||moduleTopics(id).some(t=>t.title.includes(query))||modulePoints[id].some(p=>p.title.includes(query)||p.statement.includes(query)));
   if(!matched.length)continue;box.append(el('h3',subject));
   for(const id of matched){
    const unit=el('details',undefined,'directory-module');rememberDisclosure(unit,'module:'+id,id===currentModule,!!query);if(query)unit.open=true;
    const summary=el('summary');summary.append(el('span',moduleMap[id].title,'directory-module-title'));unit.append(summary);
-   unit.append(action('阅读单元讲解',()=>openLesson(id),'directory-overview'));
-   const points=modulePoints[id].filter(p=>!query||moduleMap[id].title.includes(query)||p.title.includes(query)||p.statement.includes(query));matches+=points.length;
-   const groups=new Map();for(const p of points){const title=pointGroup(p);if(!groups.has(title))groups.set(title,[]);groups.get(title).push(p);}
-   for(const [title,list] of groups){
-    const key=sectionKey(id,title),details=el('details',undefined,'book-directory');rememberDisclosure(details,'group:'+key,list.some(p=>p.id===currentPoint?.id),!!query);if(query)details.open=true;
-    const heading=el('span',undefined,'directory-heading');heading.append(el('span',title,'directory-title'),el('span',`${list.length} 个考点`,'directory-count'));const label=el('summary');label.append(heading);details.append(label);
-    for(const p of list){const button=action(p.title,()=>openPoint(p.id),'subtopic');directoryPointButtons.set(p.id,button);details.append(button);}
+   unit.append(action('阅读模块讲解',()=>openLesson(id),'directory-overview'));
+   for(const t of moduleTopics(id)){
+    const all=t.pointIds.map(pid=>pointMap.get(pid)),list=all.filter(p=>!query||moduleMap[id].title.includes(query)||t.title.includes(query)||p.title.includes(query)||p.statement.includes(query));
+    if(!list.length)continue;matches+=list.length;
+    const key=sectionKey(id,t.title),details=el('details',undefined,'book-directory');rememberDisclosure(details,'group:'+key,t.id===currentTopic?.id||all.some(p=>p.id===currentPoint?.id),!!query);if(query)details.open=true;
+    const heading=el('span',undefined,'directory-heading');heading.append(el('span',t.title,'directory-title'),el('span',`${all.length} 个考点`,'directory-count'));const label=el('summary');label.append(heading);details.append(label);
+    const button=action('学习完整专题',()=>openTopic(t.id),'directory-overview');directoryTopicButtons.set(t.id,button);details.append(button);
+    if(query){for(const p of list){const b=action(p.title,()=>openPoint(p.id),'subtopic');directoryPointButtons.set(p.id,b);details.append(b);}}
     directoryGroups.set(key,details);unit.append(details);
    }
    directoryModules.set(id,unit);box.append(unit);
   }
  }
- $('courseDirectoryMeta').textContent=query?`找到 ${matches} 个考点`:`${STUDY.modules.length} 个单元 · ${STUDY.knowledge.length} 个考点`;
- if(!box.children.length)box.append(el('p','没有匹配考点，请换关键词。'));
+ const count=[...topicMap.values()].filter(t=>t.pointIds.length&&!t.overviewOnly).length;
+ $('courseDirectoryMeta').textContent=query?`找到 ${matches} 个考点`:`${SUBJECTS.length} 门学科 · ${STUDY.modules.length} 个模块 · ${count} 个专题`;
+ if(!box.children.length)box.append(el('p','没有匹配内容，请换关键词。'));
  updateDirectorySelection();$('courseSidebar').scrollTop=scrollTop;
 }
 function updateDirectorySelection(){
@@ -438,14 +443,17 @@ function updateDirectorySelection(){
  if(previousDirectoryModule)directoryModules.get(previousDirectoryModule)?.children[0].classList.remove('current');
  const unit=directoryModules.get(currentModule);if(unit){unit.children[0].classList.add('current');if(previousDirectoryModule!==currentModule)unit.open=true;}
  for(const [id,button] of directoryPointButtons){const p=pointMap.get(id);button.textContent=`${pointDone(p)?'✓ ':''}${p.title}`;}
+ for(const [tid,b] of directoryTopicButtons){const selected=tid===(currentTopic?.id||STUDY.pointTopics?.[currentPoint?.id]);b.classList.toggle('current',selected);if(selected)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');}
  if(currentPoint){const button=directoryPointButtons.get(currentPoint.id);if(button){button.classList.add('current');button.setAttribute('aria-current','page');}if(previousDirectoryPoint!==currentPoint.id){const group=directoryGroups.get(sectionKey(currentModule,pointGroup(currentPoint)));if(group)group.open=true;if(unit)unit.open=true;}}
+ if(currentTopic&&previousDirectoryTopic!==currentTopic.id){const group=directoryGroups.get(sectionKey(currentModule,currentTopic.title));if(group)group.open=true;}
+ previousDirectoryTopic=currentTopic?.id||null;
  previousDirectoryPoint=currentPoint?.id||null;previousDirectoryModule=currentModule;
  captureDirectory();saveCourseNavigation();
 }
 function locateCurrentPoint(){
  if(directoryMode==='books'){for(const b of $('courseDirectory').children)if(b.dataset?.chapterId===currentChapter?.id)b.scrollIntoView({block:'nearest',behavior:'auto'});return;}
  const unit=directoryModules.get(currentModule);if(unit)unit.open=true;
- if(currentPoint){const group=directoryGroups.get(sectionKey(currentModule,pointGroup(currentPoint)));if(group)group.open=true;directoryPointButtons.get(currentPoint.id)?.scrollIntoView({block:'nearest',behavior:'auto'});}
+ if(currentPoint){const group=directoryGroups.get(sectionKey(currentModule,pointGroup(currentPoint)));if(group)group.open=true;(directoryPointButtons.get(currentPoint.id)||directoryTopicButtons.get(STUDY.pointTopics[currentPoint.id]))?.scrollIntoView({block:'nearest',behavior:'auto'});}
  else unit?.scrollIntoView({block:'nearest',behavior:'auto'});
  captureDirectory();saveCourseNavigation();
 }
@@ -463,15 +471,20 @@ function renderGuide(id) {
  const links=el('div',undefined,'actions');links.append(action('时间线、事件线与方法',()=>{selectedTimeline=STUDY.timelines.find(t=>t.module===id)?.id||'history';show('tools');}),action('查看本单元考点覆盖',()=>{$('coverageModule').value=id;show('coverage');}));box.append(links);
 }
 function renderLessonPoints(id) {
- captureLessonSections();const box=$('lessonPoints');box.replaceChildren();const points=modulePoints[id];
- box.append(el('h3',`本单元 ${points.length} 个考点`),el('p','按小节展开，点开考点可看定义、辨析路径、回忆问题和对应练习。','muted'));
- const groups=new Map();for(const p of points){const title=p.group||chapterMap[p.chapters[0]]?.title||'核心辨析与应用';if(!groups.has(title))groups.set(title,[]);groups.get(title).push(p);}
+ captureLessonSections();const box=$('lessonPoints');box.replaceChildren();const points=modulePoints[id],topics=moduleTopics(id);
+ box.append(el('h3',`本模块 ${topics.length} 个专题 · ${points.length} 个考点`),el('p','沿专题建立框架，再学习具体考点。每个专题包含基础内容、概念关系、易混辨析与练习。','muted'));
  let sectionIndex=0;
- for(const [title,list] of groups){const detail=el('details',undefined,'reading-detail course-section');rememberDisclosure(detail,'lesson:'+sectionKey(id,title),sectionIndex===0);const summary=el('summary');const heading=el('span',undefined,'section-heading');heading.append(el('span',title,'section-title'),el('span',`${list.length} 个考点 · 已练 ${list.filter(pointDone).length} 个`,'section-meta'));summary.append(el('span',String(++sectionIndex).padStart(2,'0'),'section-index'),heading);detail.append(summary);
-   const guide=STUDY.unitGuides[title];if(guide)detail.append(el('p',guide.explanation),el('p',guide.method,'method-box'));
-   const links=el('div',undefined,'point-links');for(const p of list)links.append(action(p.title,()=>openPoint(p.id),'point-link'));detail.append(links);box.append(detail);}
+ for(const t of topics){const list=t.pointIds.map(pid=>pointMap.get(pid));const detail=el('details',undefined,'reading-detail course-section');rememberDisclosure(detail,'lesson:'+sectionKey(id,t.title),sectionIndex===0);const summary=el('summary');const heading=el('span',undefined,'section-heading');heading.append(el('span',t.title,'section-title'),el('span',`${list.length} 个考点 · 已练 ${list.filter(pointDone).length} 个`,'section-meta'));summary.append(el('span',String(++sectionIndex).padStart(2,'0'),'section-index'),heading);detail.append(summary,el('p',t.overview),topicDiagram(t));
+   for(const g of t.foundations||[])detail.append(foundationGuide(g));
+   detail.append(el('p',t.connection),el('p','易混点：'+t.boundary,'method-box'));
+   const links=el('div',undefined,'actions');links.append(action('学习完整专题',()=>openTopic(t.id),'btn'));if(t.questionIds.length)links.append(action('连续练这个专题',()=>startQuiz(t.questionIds.map(qid=>questionMap.get(qid)).filter(Boolean)),'btn secondary'));detail.append(links);box.append(detail);}
  const ref=el('details',undefined,'reading-detail');ref.append(el('summary',id==='m14'?'需要核对时：吉林专题官方来源':'需要核对时：本单元的资料章节'));const list=el('div',undefined,'chapter-links');
  for(const c of STUDY.curriculum.filter(c=>c.module===id))list.append(action(`${c.title} · ${sourceMap[c.source].name}`,()=>openChapter(c.id),'btn ghost'));if(id==='m14'){for(const s of STUDY.webSources){const a=el('a',s.name,'btn ghost');a.href=s.url;a.target='_blank';list.append(a);}}ref.append(list);box.append(ref);
+}
+function foundationGuide(guide){
+ const section=el('section',undefined,'foundation-guide');section.dataset.foundationId=guide.id;section.append(el('h4','基础补全 · '+guide.title));
+ const list=el('ol',undefined,'concept-members');for(const member of guide.members){const row=el('li');row.append(el('strong',member.name),el('p',member.meaning));list.append(row);}section.append(list,el('p','易混辨析：'+guide.distinction),el('p','回忆方法：'+guide.recall,'method-box'));
+ if(guide.authority){const link=el('a','核对权威依据 ↗');link.href=guide.authority;link.target='_blank';link.rel='noopener';section.append(link);}return section;
 }
 function conceptGuide(guide) {
  const section=el('section',undefined,'concept-guide');section.setAttribute('aria-label','考点的具体内容');
@@ -485,6 +498,7 @@ function openPoint(id) {
  $('moduleLesson').classList.add('hidden');$('chapterLesson').classList.add('hidden');$('pointLesson').classList.remove('hidden');
  const box=$('pointLesson');box.replaceChildren();const nav=el('nav',undefined,'point-navigation');nav.setAttribute('aria-label','考点阅读导航');const path=el('div',undefined,'point-path');path.append(action(moduleMap[p.module].title,()=>openLesson(p.module),'point-breadcrumb'),el('span',pointGroup(p),'point-path-group'),action('目录',()=>{$('courseSidebar').scrollIntoView({block:'start',behavior:'auto'});locateCurrentPoint();},'point-directory-return'));const controls=el('div',undefined,'point-navigation-actions');const points=modulePoints[p.module],index=points.findIndex(item=>item.id===p.id);const previous=action('上一考点',()=>openPoint(points[index-1].id),'btn ghost'),next=action('下一考点',()=>openPoint(points[index+1].id),'btn secondary');previous.disabled=index===0;next.disabled=index===points.length-1;controls.append(el('span',`${index+1} / ${points.length}`,'point-position'),previous,next);nav.append(path,controls);box.append(nav);box.append(el('span',moduleMap[p.module].title,'badge'),el('h2',p.title),el('p',p.statement,'thesis'));
  if(p.studyGuide)box.append(conceptGuide(p.studyGuide));
+ for(const g of p.prerequisites||[])box.append(foundationGuide(g));
  const pictures=pointPictures([p.id]);if(pictures.length)box.append(el('h3','图片对照'),visualGallery(pictures));
  const topic=topicMap.get(STUDY.pointTopics?.[p.id]);if(topic)box.append(topicExpansion(topic,{excludeVisualIds:pictures.map(v=>v.id)}));
  if(p.checkedAt)box.append(el('p',`官方资料核对：${p.checkedAt}${p.dataYear?' · 数据所属年度：'+p.dataYear:''}`,'muted small'));
@@ -501,7 +515,7 @@ function openPoint(id) {
  box.append(el('p',STUDY.guides[p.module].method,'method-box'));
  const a=el('a',`核对资料：${referenceLabel(p.source,p.page)}`);a.href=sourceLink(p.source,p.page);a.target='_blank';box.append(a);
  if(p.authority){const link=el('a','核对现行权威依据');link.href=p.authority;link.target='_blank';link.rel='noopener';box.append(el('p',p.correction||'本考点已结合现行依据整理。','muted'),link);}
- if(p.status)box.append(el('p',p.reviewReason,'method-box'));
+ if(p.reviewReason&&p.status!=='ready')box.append(el('p',p.reviewReason,'method-box'));
  const actions=el('div',undefined,'actions');if(qs.length)actions.append(action('练这个考点',()=>startQuiz(qs),'btn'));actions.append(action('在本单元继续随机练',()=>startQuiz(STUDY.questions.filter(q=>q.module===p.module))),action('返回课程讲解',()=>openLesson(p.module)));box.append(actions);
  renderCourseDirectory();showCourseContent('pointLesson');
 }
@@ -700,7 +714,8 @@ function renderAnswer(originalIndex){
   else feedback.append(extensionHeading,extension);
   feedback.append(source);
   const pictures=pointPictures(q.pointIds||[]);if(pictures.length)feedback.append(el('h3','看图巩固本题考点'),visualGallery(pictures));
-  const topic=topicMap.get(STUDY.questionTopics?.[q.id]);if(topic)feedback.append(topicExpansion(topic,{excludeVisualIds:pictures.map(v=>v.id)}));
+  const topicIds=STUDY.questionTopicIds?.[q.id]||[STUDY.questionTopics?.[q.id]];
+  for(const [index,tid] of topicIds.entries()){const topic=topicMap.get(tid);if(!topic)continue;const expansion=topicExpansion(topic,{excludeVisualIds:pictures.map(v=>v.id)});if(index===0)feedback.append(expansion);else{const part=el('details',undefined,'reading-detail assessed-topic');part.append(el('summary','本题还考查：'+topic.title),expansion);feedback.append(part);}}
   for(const ref of q.extraRefs||[]){if(ref.source===q.source&&ref.page===q.page)continue;const link=el('a',`其他依据：${referenceLabel(ref.source,ref.page)}`);link.href=sourceLink(ref.source,ref.page);link.target='_blank';feedback.append(el('p'),link);}
   if(q.authority){const official=el('a','核对现行权威依据 ↗');official.href=q.authority;official.target='_blank';official.rel='noopener';feedback.append(el('p'),official);}
   const point=q.pointIds?.[0];if(point)feedback.append(el('p'),action('回到本题知识点讲解',()=>openPoint(point)));

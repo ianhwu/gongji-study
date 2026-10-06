@@ -487,6 +487,29 @@ add("m12","modern-science-programs","现代中国科技：人物、计划与航�
     "交换攀登与火炬的目标，或交换墨子号与悟空号的任务，观察名称背后的功能是否成立。",
     "闭卷给出三钱、三颗科学卫星及四个导航系统，分别写出领域、任务与建设方。")
 
+from course_topics import extend
+extend(add)
+
+# Narrow legacy topic wording after splitting broad units into distinct lessons.
+for t in TOPICS:
+    if t['id']=='topic-ancient-institutions':
+        t['title']='中国古代史：制度、人物与社会变迁'
+        t['diagram'] += [dict(label='明清交替背景',text='1619年萨尔浒战役联系明与后金的军事冲突，按时代和交战双方辨认。')]
+    if t['id']=='topic-wars-timeline':
+        t['diagram'].insert(0,dict(label='1935年长征阶段',text='娄山关战斗联系红军长征与遵义会议后的军事行动，不能当作抗日会战。'))
+    if t['id']=='topic-judicial-organs':
+        t['title']='司法机关与国家赔偿'
+        t['diagram'].append(dict(label='国家赔偿',text='国家机关及其工作人员违法行使职权侵害合法权益时，按法定条件与程序请求赔偿；刑事、行政赔偿与一般民事赔偿区别学习。'))
+    if t['id']=='topic-civil-rights':
+        t.update(title='知识产权：著作权、专利与商标',overview='知识产权保护智力成果与商业标识，三类权利的对象和取得方式不同。',diagram=[dict(label=a,text=b) for a,b in [('著作权','联系文学、艺术、科学作品的创作与表达，不保护抽象思想本身。'),('专利权','发明、实用新型、外观设计的制度对象和条件不同。'),('商标权','关注区分商品或服务来源的标识，不能与作品作者署名混同。'),('权利边界','保护对象、取得条件、期限和侵权行为分别核查，不能一概套用。')]],connection='先识别作品、技术方案或标识，再选择相应制度分析。',boundary='知识产权不是对所有知识本身的占有；具体权利受法定条件与期限限制。',recall='用小说、技术方案、商品标识各举一例并分类。')
+    if t['id']=='topic-security-ecology':
+        t.update(title='总体国家安全观',overview='国家安全按目标、根本与基础形成整体框架。',diagram=[dict(label=a,text=b) for a,b in [('人民安全','以人民安全为宗旨。'),('政治安全','以政治安全为根本。'),('经济安全','以经济安全为基础。'),('各领域安全','统筹传统与非传统安全、发展与安全，生态等领域相互联系。')]],connection='把人民、政治、经济分别放到宗旨、根本、基础，联系各领域安全。',boundary='不能把发展与安全机械割裂，也不能交换宗旨、根本、基础。',recall='闭卷写宗旨、根本、基础，并给不同安全领域举例。')
+    if t['id']=='topic-science-history':
+        t['title']='科技史：人物、著作、发明与工业革命'
+        t['diagram'] += [dict(label='三次工业革命',text='第一次以蒸汽机的广泛应用为重要标志；第二次联系电力；第三次联系电子信息、原子能等技术发展。')]
+    if t['id']=='topic-biology-cell':t['title']='细胞结构、遗传与能量转换'
+    if t['id']=='topic-biology-ecology':t['title']='生物分类、生态系统与生物技术'
+
 def compile_topics(study):
     """Use heading/prompt first. Every question gets a topical lesson or a clear unit overview."""
     chapters={c['id']:c for c in study['curriculum']}
@@ -502,32 +525,25 @@ def compile_topics(study):
             variant=' '.join(guide['case']),recall='先复述本题考点，再按上面的分类维度与相近概念对照。说明题干哪个条件决定答案。',layout='compare',overviewOnly=True)
         candidates[module['id']].append(fallback)
         result+=candidates[module['id']]
-    def classify(module, title, context=''):
-        general={'犯罪','行政','民法','宪法','文化','光','河','诗','词','党的','公司','主体','客体','价值','人口','地理','生物','气候','历史','发展','实践','认识','法律关系'}
-        scored=[]
-        for t in candidates[module]:
-            score=sum((2 if k in general else 8+min(len(k),6)) for k in t['keywords'] if k in title)
-            if score<8:score+=sum((1 if k in general else min(len(k),5)) for k in t['keywords'] if k in context)
-            if score:scored.append((score,t['id']))
-        return max(scored,default=(0,candidates[module][-1]['id']))[1]
-    point_topics={}
-    for p in points.values():
-        context=p.get('statement','')+' '+p.get('group','')
-        point_topics[p['id']]=classify(p['module'],p['title'],context)
+    # Persisted curation by stable point ID. Distractor wording cannot change associations.
+    point_topics=json.loads((Path(__file__).parent/'course-topic-map.json').read_text())
+    assert set(points)==set(point_topics), 'New knowledge requires an explicit course assignment'
+    by_id={t['id']:t for t in result}
+    for pid,tid in point_topics.items():
+        assert tid in by_id and by_id[tid]['module']==points[pid]['module'], (pid,tid)
     question_topics={}
+    question_topic_ids={}
     for q in study['questions']:
-        # Prompt and options carry the examination target, not incidental chapter-wide terms.
-        target=q['prompt']+' '+(' '.join(q['options']))
-        context=' '.join(points[i]['title'] for i in q.get('pointIds',[]) if i in points)
-        topic=classify(q['module'],target,context)
-        if topic.endswith('-overview'):
-            topic=next((point_topics[i] for i in q.get('pointIds',[]) if i in point_topics and not point_topics[i].endswith('-overview')),topic)
-        question_topics[q['id']]=topic
+        ids=list(dict.fromkeys(point_topics[i] for i in q.get('pointIds',[]) if i in point_topics))
+        assert ids, 'Question requires actual assessed point IDs: '+q['id']
+        question_topic_ids[q['id']]=ids
+        question_topics[q['id']]=ids[0]
+    study['questionTopicIds']=question_topic_ids
     from reading_edition import PICTURE_PAGES
     images=json.loads((Path(__file__).parent/'reading-images.json').read_text())
     for t in result:
         t['pointIds']=[p['id'] for p in points.values() if point_topics[p['id']]==t['id']]
-        t['questionIds']=[q['id'] for q in study['questions'] if question_topics[q['id']]==t['id']]
+        t['questionIds']=[q['id'] for q in study['questions'] if t['id'] in question_topic_ids[q['id']]]
         refs=[]
         for p in (points[i] for i in t['pointIds']):
             if p.get('status')=='needs-review':continue
@@ -553,8 +569,10 @@ def compile_topics(study):
                 if info:t['sourceFigures'].append(dict(info))
             if len(t['sourceFigures'])==2:break
         t['relatedTopicIds']=[x['id'] for x in candidates[t['module']] if x['id']!=t['id'] and not x.get('overviewOnly')]
-        t['visualIds']=[v['id'] for v in study['visualReferences'] if t['id'] in v.get('topicIds',[]) or any(point_topics.get(i)==t['id'] for i in v['pointIds'])]
+        t['visualIds']=[v['id'] for v in study['visualReferences'] if any(point_topics.get(i)==t['id'] for i in v['pointIds'])]
         t.pop('keywords',None)
+    from course_foundations import apply_foundations
+    apply_foundations(study,result)
     return result,point_topics,question_topics
 
 

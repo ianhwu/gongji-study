@@ -305,7 +305,7 @@ const pointForNav=study.knowledge.find(p=>p.module==='m01');
 vm.runInContext(`openPoint('${pointForNav.id}')`,context);
 assert.equal($('courseDirectory').children[0],directoryBefore[0],'directory is updated without replacement');
 assert(groups[0].open&&groups[1].open,'expanded siblings stay open');assert.equal($('courseSidebar').scrollTop,137);
-assert.equal(vm.runInContext(`directoryPointButtons.get('${pointForNav.id}').getAttribute?.('aria-current')||directoryPointButtons.get('${pointForNav.id}')['aria-current']`,context),'page');
+assert.equal(vm.runInContext(`directoryTopicButtons.get(STUDY.pointTopics['${pointForNav.id}']).getAttribute?.('aria-current')||directoryTopicButtons.get(STUDY.pointTopics['${pointForNav.id}'])['aria-current']`,context),'page');
 vm.runInContext("openLesson('m07');openLesson('m01')",context);assert(groups[0].open&&groups[1].open,'switching units leaves other branches available');
 const lessonSection=$('lessonPoints').children.find(e=>e.className.includes('course-section'));lessonSection.open=false;
 vm.runInContext(`openPoint('${pointForNav.id}');openLesson('m01')`,context);
@@ -328,7 +328,7 @@ for(const image of visuals){
  const bytes=fs.readFileSync('public'+image.asset);assert(bytes.length>1000);assert((bytes[0]===255&&bytes[1]===216)||bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'valid JPEG or PNG asset');
 }
 vm.runInContext("openLesson('m14')",context);
-assert($('lessonViewImages').textContent.includes('图解与图片 · 3 个专题'));assert(!$('lessonVisuals').className.includes('hidden'));
+assert($('lessonViewImages').textContent.includes('图解与图片 · 5 个专题'));assert(!$('lessonVisuals').className.includes('hidden'));
 const moduleImage=walk($('lessonVisuals')).find(e=>e.tag==='img');assert.equal(moduleImage.loading,'lazy');assert.equal(moduleImage.decoding,'async');
 walk($('lessonVisuals')).find(e=>e.className==='visual-point-link').onclick();assert.equal(vm.runInContext('currentPoint.id',context),'jl-point-crater-lake');
 assert(walk($('pointLesson')).some(e=>e.tag==='img'&&e.alt.startsWith('长白山天池')));
@@ -442,7 +442,7 @@ assert(walk($('navigationReturn')).some(e=>e.textContent==='返回错题复习')
 console.log('Navigation passed: answer-to-knowledge return, browser back/forward, active quiz resumption, multi drafts, no duplicate writes, settings/exit, PDF page and coverage/wrong-list return.');
 // Thematic expansions explain the entire group and retain the active question.
 const topicById=new Map(study.topicExpansions.map(t=>[t.id,t]));
-assert.equal(study.topicExpansions.filter(t=>!t.overviewOnly).length,65);
+assert.equal(study.topicExpansions.filter(t=>!t.overviewOnly).length,91);
 for(const question of study.questions){const topic=topicById.get(study.questionTopics[question.id]);assert(topic&&!topic.overviewOnly,'every question has an authored subject-specific expansion');assert.equal(topic.module,question.module);assert(topic.diagram.length>=3);}
 for(const point of study.knowledge)assert.equal(topicById.get(study.pointTopics[point.id]).module,point.module);
 for(const topic of study.topicExpansions){assert(topic.overview&&topic.connection&&topic.boundary&&topic.variant&&topic.recall);assert(topic.relatedTopicIds.every(id=>topicById.get(id).module===topic.module));if(topic.diagramAsset)assert(fs.existsSync('public/'+topic.diagramAsset));for(const figure of topic.sourceFigures)assert(fs.existsSync('public/'+figure.src));}
@@ -457,7 +457,7 @@ walk(expansion).find(e=>e.textContent==='打开完整专题').onclick();assert.e
 walk($('lessonReturn')).find(e=>e.textContent==='返回刷题').onclick();await settleNavigation();assert.equal(practiceSnapshot(),answerBeforeTopic);
 browserWindow.history.forward();await settleNavigation();assert.equal(vm.runInContext('currentTopic.id',context),'topic-law-functions','browser forward restores full topic');
 vm.runInContext("openTopic('topic-crime-stages')",context);walk($('lessonReturn')).find(e=>e.textContent==='返回当前题').onclick();assert.equal(practiceSnapshot(),answerBeforeTopic);await drain();assert.equal(JSON.parse(rows.get('frontend-test').state_json).attempts.q001.count,topicAttempt,'reading expanded knowledge does not submit another answer');
-console.log('Topic expansions passed: 62 authored systems, all 721 questions and 1152 points linked, functional diagram assets, safe factual image links, full-topic return and history preserve attempts.');
+console.log('Topic expansions passed: 91 authored systems, all 1011 questions and 1152 points linked, functional diagram assets, safe factual image links, full-topic return and history preserve attempts.');
 
 // Every selection subset must be graded against the requested multiple-question version.
 const refreshedMulti=rawStudy.questions.filter(q=>q.type==='multiple');
@@ -556,3 +556,39 @@ while(seenPointIds.size<study.knowledge.length){
 }
 vm.runInContext(`state=${savedCoverageState}`,context);
 console.log(JSON.stringify({fullCoverage:'passed',knowledge:seenPointIds.size,questions:study.questions.length,newQuestions:addedCoverage.length,exhaustiveGrades:coverageGrades,continuousDrawsToCoverKnowledge:seenQuestionIds.size}));
+
+// Curated prerequisites and course associations are shared across every entry point.
+const curatedTopics=JSON.parse(fs.readFileSync('src/course-topic-map.json','utf8'));
+assert.equal(Object.keys(curatedTopics).length,1152);
+for(const q of study.questions){
+ const expected=[...new Set(q.pointIds.map(id=>curatedTopics[id]))];
+ assert.deepEqual(Array.from(study.questionTopicIds[q.id]),expected,'expansion follows assessed knowledge, including multi-topic questions');
+ for(const id of expected)assert(topicById.get(id).questionIds.includes(q.id));
+}
+assert(study.questions.some(q=>study.questionTopicIds[q.id].length>1));
+const originalPointIndex=study.knowledge;
+const namedPoint=title=>study.knowledge.find(p=>p.title===title);
+assert.equal(study.pointTopics[namedPoint('价格机制').id],'topic-market-demand');
+assert.equal(study.pointTopics[namedPoint('四个意识').id],'topic-party-building');
+assert.equal(study.pointTopics[namedPoint('中国太阳能资源分布').id],'topic-energy-environment');
+assert.equal(study.pointTopics[namedPoint('生产关系的三个要素').id],'topic-commodity-money');
+assert.equal(study.foundationCount,38);
+vm.runInContext("openLesson('m06')",context);
+assert.equal(vm.runInContext('directoryPointButtons.size',context),0,'default directory consists of module and topic entries');
+assert.equal(vm.runInContext('directoryGroups.size',context),91,'each thematic lesson appears once');
+for(const member of principles.studyGuide.members)assert(contentText($('lessonPoints')).includes(member.name));
+vm.runInContext("openTopic('topic-theory-development')",context);
+for(const member of principles.studyGuide.members)assert(contentText($('pointLesson')).includes(member.name));
+assert(walk($('pointLesson')).some(e=>e.className==='lesson-fact'),'full course has inline fact teaching, not only links or PDFs');
+for(const title of ['“两个基本点”','强国之路']){
+ const p=namedPoint(title);assert(p.prerequisites?.length);
+ vm.runInContext(`openPoint('${p.id}')`,context);
+ for(const member of principles.studyGuide.members)assert(contentText($('pointLesson')).includes(member.name));
+}
+const strongRoad=study.questions.find(q=>q.id==='q130');
+vm.runInContext(`queue=[questionMap.get('${strongRoad.id}')];at=0;answered=true;displayOrder=[0,1,2,3];renderQuestion();answered=true;renderAnswer(queue[0].answer)`,context);
+for(const member of principles.studyGuide.members)assert(contentText($('feedback')).includes(member.name));
+$('courseSearch').value='四项基本原则';vm.runInContext('renderCourseDirectory()',context);
+assert(vm.runInContext('directoryPointButtons.has(currentPoint.id)',context),'search can still reach individual point details');
+$('courseSearch').value='';vm.runInContext('renderCourseDirectory()',context);
+console.log(JSON.stringify({courseModules:'passed',subjects:10,modules:13,topics:91,prerequisiteGroups:38,assessedQuestions:study.questions.length,inlineCourses:true,defaultPointLeaves:0}));
