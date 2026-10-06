@@ -5,7 +5,8 @@ import ts from 'typescript';
 import { webcrypto } from 'node:crypto';
 
 const history = JSON.parse(fs.readFileSync('src/question-history.json','utf8'));
-const study = JSON.parse(fs.readFileSync('src/learning.json', 'utf8'));
+const rawStudy = JSON.parse(fs.readFileSync('src/learning.json', 'utf8'));
+const study = vm.runInNewContext(fs.readFileSync('public/learning-data.js', 'utf8') + ';STUDY;');
 let user = { userId:'tester-a',email:'a@example.test' }, unavailable = false;
 const rows = new Map();
 const db = {
@@ -31,7 +32,7 @@ const db = {
 let source = fs.readFileSync('app/api/progress/route.ts','utf8');
 source=source.replace(/^import .*;\n/gm,'').replace(/\bexport /g,'');
 source=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
-const api=vm.createContext({Response,Request,URL,Date,Map,Set,JSON,console:{error(){}},learning:study,history,
+const api=vm.createContext({Response,Request,URL,Date,Map,Set,JSON,console:{error(){}},learning:rawStudy,history,
   getChatGPTUser:async()=>user,getRawDb:()=>{if(unavailable) throw new Error('DB unavailable');return db;}});
 vm.runInContext(source+'\nglobalThis.api={GET,POST};',api);
 const request=(body,origin='https://study.test')=>new Request('https://study.test/api/progress',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -174,8 +175,8 @@ $('courseSearch').value='合同';vm.runInContext('renderCourseDirectory()',conte
 $('courseSearch').value='不存在的测试章节';vm.runInContext('renderCourseDirectory()',context);assert.equal(vm.runInContext('courseChapters().length',context),0);
 $('courseSearch').value='';$('courseBook').value='bottom';
 await $('fullBook').onclick();assert.equal(vm.runInContext('currentChapter.source',context),'bottom');assert.equal(vm.runInContext('currentChapter.isBook',context),undefined,'book opens chapter learning edition rather than front matter');
-$('chapterPageInput').value='314';await $('chapterJump').onclick();assert.equal(vm.runInContext('chapterPage',context),314);
-assert.equal(JSON.parse(rows.get('frontend-test').state_json).reading[vm.runInContext('currentChapter.id',context)].page,314);
+$('chapterPageInput').value='314';await $('chapterJump').onclick();assert.equal(vm.runInContext('chapterPage',context),312,'blank tail pages are skipped');
+assert.equal(JSON.parse(rows.get('frontend-test').state_json).reading[vm.runInContext('currentChapter.id',context)].page,312);
 assert($('accountEntry').textContent.includes('账号'));
 vm.runInContext("show('tools')",context);assert.equal($('timelineTabs').children.length,study.timelines.length);assert($('methodContent').children.length===study.modules.length);
 $('hideDates').onclick();const node=$('timelineContent').children.find(x=>x.className==='timeline').children[0];assert(node.children[0].textContent.includes('回忆时间'));node.children[0].onclick();assert.equal(node.children[0].textContent,study.timelines[0].events[0][0]);
@@ -372,15 +373,24 @@ console.log(JSON.stringify({status:'passed',checks:['previous restores choices o
 vm.runInContext("show('library')",context);assert.equal($('bookLibrary').children.length,5);
 const edition=vm.runInContext('STUDY.readingEdition',context);
 assert.equal(Object.keys(edition).length,study.curriculum.length);
-assert.equal(study.curriculum.filter(c=>['top','bottom'].includes(c.source)&&edition[c.id].authored).length,118);
+assert.equal(study.curriculum.filter(c=>['top','bottom'].includes(c.source)&&edition[c.id].authored).length,108);
 for(const c of study.curriculum){assert(c.start<=c.end);assert(edition[c.id].thesis&&edition[c.id].route&&edition[c.id].trap&&edition[c.id].recall);for(const id of edition[c.id].pointIds){const p=study.knowledge.find(p=>p.id===id);assert(p.source===c.source&&p.page>=c.start&&p.page<=c.end);}}
-for(const source of study.sources){const rows=JSON.parse(fs.readFileSync('public/editions/'+source.id+'.json','utf8')),original=active.pages.filter(p=>p.s===source.id);assert.equal(rows.length,original.length,'all included PDF pages retain reading access');assert(rows.every(r=>r.blocks.every(b=>!/(微信公众号|售后微信|biguo25)/.test(b.text))));}
+for(const source of study.sources){const rows=JSON.parse(fs.readFileSync('public/editions/'+source.id+'.json','utf8')),original=active.pages.filter(p=>p.s===source.id);const excluded=new Set(study.readingCleanup.excludedPages[source.id]||[]);assert.equal(rows.length,original.filter(p=>!excluded.has(p.p)).length,'only useful source pages appear in reading edition');assert(rows.every(r=>r.blocks.every(b=>!/(微信公众号|售后微信|biguo25)/.test(b.text))));}
 await vm.runInContext("openChapter('chapter-top-12')",context);assert.equal(vm.runInContext('chapterPage',context),11,'corrected top book PDF offset');assert.equal(vm.runInContext('directoryMode',context),'books');
-const directory=$('courseDirectory');const currentButtons=directory.children.filter(b=>b.dataset?.chapterId);assert.equal(currentButtons.length,62);
+const directory=$('courseDirectory');const currentButtons=directory.children.filter(b=>b.dataset?.chapterId);assert.equal(currentButtons.length,57);
 const stable=directory.children[2];await vm.runInContext("openChapter('chapter-top-31')",context);assert.equal(directory.children[2],stable,'book directory remains mounted across chapter clicks');
 await vm.runInContext('turnChapterPage(1)',context);const page=vm.runInContext('chapterPage',context);assert.equal(page,31);
 $('readerFont').onclick();assert($('lesson').className.includes('reader-large'));$('readerPaper').onclick();assert($('lesson').className.includes('reader-paper'));
 assert(JSON.parse(drafts.get('gongji-reading-preferences-v1')).recent.top.page===page);
 $('directorySubjects').onclick();assert.equal(vm.runInContext('directoryMode',context),'subjects');
 assert($('courseDirectory').children.length>0);
-console.log('Reading edition passed: 321 chapters, 118 independent book guides, all source pages, corrected offsets, persistent directory and preferences.');
+console.log('Reading edition passed: 303 chapters, 108 book guides, utility pages excluded, original screenshots preserved, corrected offsets, persistent directory and preferences.');
+
+// Source images must correspond to real retained pages, including image-only diagrams.
+assert.equal(study.readingCleanup.removedChapters.length,18);
+assert(study.curriculum.every(c=>!c.title.includes('章节框架')&&!c.title.endsWith('总览')));
+for(const [key,info] of Object.entries(study.readingImages)){assert.equal(key,info.source+':'+info.page);assert(fs.existsSync('public/'+info.src));assert(info.width>=1200&&info.height>0);assert(!info.src.startsWith('/'));}
+for(const name of ['top','bottom']){const pages=JSON.parse(fs.readFileSync('public/editions/'+name+'.json'));assert(pages.every(p=>p.image),'every retained book page has its original screenshot');}
+await vm.runInContext("openChapter('chapter-bottom-258',262)",context);assert(walk($('chapterBody')).some(e=>e.tag==='img'&&e.src==='images/reading/bottom/262.jpg'));assert(!walk($('chapterBody')).some(e=>e.textContent?.includes('全老维')),'diagram OCR is not presented as prose');
+await vm.runInContext("openChapter('chapter-top-83')",context);assert.equal(vm.runInContext('currentChapter.id',context),'chapter-top-84','old outline link resolves to useful content');
+console.log('Original page screenshot and removed-chapter compatibility checks passed.');

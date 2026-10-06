@@ -182,16 +182,74 @@ def clean_blocks(text):
         else: blocks.append(dict(type=kind,text=line))
     return blocks
 
+# Reviewed front matter and divider pages. Original source references remain intact.
+FRONT_MATTER = {'top':set(range(1,9)), 'bottom':set(range(1,9)),
+                'color':set(range(1,7)), 'tricolor':{1}, 'mindmap':set(range(1,8))}
+EMPTY_DIVIDERS = {'mindmap':{109,145,185,205,223,231,255}, 'bottom':{313,314}}
+# Candidate pages for expanded source comparisons; every retained page remains available.
+PICTURE_PAGES = {'top':{15,17,20,27,35,43,62,68,78,88,91,96,98,102,105,129,135,143,160,174,207,225,232,246,267,275,288,296,310,318,331},
+ 'bottom':{13,17,20,21,26,29,31,33,38,43,48,53,61,67,69,70,71,72,95,99,103,115,119,124,131,144,148,153,158,167,178,183,197,200,207,208,209,210,214,215,216,218,219,224,226,232,239,241,247,250,251,252,253,254,256,260,262,263,265,268,269,270,273,274,279,280,288,289,290,292,293,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,312}}
+
+def prepare_reading(study,pages):
+    """Remove utility-only lessons; move meaningful outline images into real lessons."""
+    by_page={(p['s'],p['p']):p['t'] for p in pages['pages']}
+    excluded={s:set(v) for s,v in FRONT_MATTER.items()}
+    for s,nums in EMPTY_DIVIDERS.items(): excluded.setdefault(s,set()).update(nums)
+    kept=[];removed=[];aliases={};pending={}
+    for original in study['curriculum']:
+        c=dict(original)
+        if c['id']=='chapter-top-10':
+            c['title']='民法典概述';c['start']=10;c['overviewPages']=[9]
+            excluded['top'].add(9)
+        utility = ('框架' in c['title'] and c['start']==c['end']) or ('总览' in c['title'] and all(len(clean_blocks(by_page.get((c['source'],n),'')))<=2 for n in range(c['start'],c['end']+1)))
+        if utility:
+            removed.append(c);excluded.setdefault(c['source'],set()).update(range(c['start'],c['end']+1))
+            if c['source'] in ('top','bottom'): pending.setdefault(c['source'],[]).extend(range(c['start'],c['end']+1))
+            continue
+        if pending.get(c['source']):
+            c['overviewPages']=list(dict.fromkeys(c.get('overviewPages',[])+pending.pop(c['source'])))
+        available=[n for n in range(c['start'],c['end']+1) if n not in excluded.get(c['source'],set())]
+        if not available: removed.append(c);continue
+        c['readingPages']=available;c['start']=available[0];c['end']=available[-1]
+        c['topics']=[topic for topic in c.get('topics',[]) if topic['page'] in available]
+        kept.append(c)
+    for c in removed:
+        successor=next((k for k in kept if k['source']==c['source'] and k['start']>c['start']),None)
+        if successor: aliases[c['id']]=successor['id']
+    study['curriculum']=kept
+    study['readingAliases']=aliases
+    study['readingCleanup']={'removedChapters':[{'id':c['id'],'title':c['title'],'source':c['source'],'start':c['start'],'end':c['end']} for c in removed], 'excludedPages':{s:sorted(v) for s,v in excluded.items()}}
+    for s in study['sources']:
+        s['readingPages']=sum(len(c['readingPages']) for c in kept if c['source']==s['id'])
+    for point in study.get('knowledge',[]):
+        point['chapters']=list(dict.fromkeys(aliases.get(cid,cid) for cid in point.get('chapters',[])))
+    if study.get('coverage'):study['coverage']['referenceChapters']=len(kept)
+    return excluded
+
 def compile_editions(study,pages):
-    notes=chapter_notes()
-    chapters={}
+    excluded=prepare_reading(study,pages)
+    notes=chapter_notes();chapters={}
     for c in study['curriculum']:
         g=study['guides'][c['module']]
         n=notes.get(c['id']) or dict(thesis=g['thesis'],route=g['method'],trap='先辨析概念的适用条件与范围，再与相邻考点比较。',recall=f'合上资料，用自己的话解释“{c["title"]}”，并给出一个例子。')
-        # Source and exact range take precedence over legacy broad pointIds.
-        points=[p['id'] for p in study['knowledge'] if p['source']==c['source'] and c['start']<=p['page']<=c['end'] and p.get('status')!='needs-review']
+        if c['id']=='chapter-top-10':n=dict(thesis='民法典以七编组织民事生活中的主体、权利、交易、家庭与责任规则。',route='先理解总则与各分编的分工；再读本页的编纂、施行与体系背景。',trap='总则适用于民事活动的一般问题；各分编提供相应领域的具体制度。',recall='民法典的七编分别解决什么问题？')
+        points=[p['id'] for p in study['knowledge'] if p['source']==c['source'] and p['page'] in c['readingPages'] and p.get('status')!='needs-review']
         chapters[c['id']]={**n,'pointIds':points,'table':TABLES.get(c['id']),'case':CASES.get(c['id']),'authored':c['id'] in notes}
+    image_index={}
+    from pathlib import Path
+    import json
+    image_manifest=Path(__file__).with_name('reading-images.json')
+    if image_manifest.exists():image_index=json.loads(image_manifest.read_text())
     editions={s['id']:[] for s in study['sources']}
     for p in pages['pages']:
-        if p['s'] in editions: editions[p['s']].append(dict(p=p['p'],blocks=clean_blocks(p['t'])))
+        if p['s'] not in editions or p['p'] in excluded.get(p['s'],set()):continue
+        blocks=clean_blocks(p['t']);text=''.join(b['text'] for b in blocks)
+        # These are actual source diagrams, not text reconstructed as a new diagram.
+        short=sum(len(b['text'])<=22 for b in blocks)
+        diagram=len(text)<460 and len(blocks)>=8 and short/max(1,len(blocks))>.72 and not re.search(r'知识点|【答案】|[。；]',text)
+        row=dict(p=p['p'],blocks=blocks,diagram=diagram or (p['s']=='bottom' and p['p'] in {210,262}))
+        image=image_index.get(p['s']+':'+str(p['p']))
+        if image:row['image']=image;row['illustrated']=p['p'] in PICTURE_PAGES.get(p['s'],set()) or '章节概况' in p['t']
+        editions[p['s']].append(row)
+    study['readingImages']=image_index
     return chapters,editions
