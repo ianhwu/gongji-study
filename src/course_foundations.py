@@ -14,6 +14,7 @@ def reuse(title,topics):
 reuse('四项基本原则','theory-development')
 reuse('党的基本路线','theory-development')
 # The prerequisite is explicit even when reading 两个基本点 or 强国之路.
+FOUNDATIONS[1]['authority']='https://download.12371.cn/wenjian/2022/11/1/djcbesddz.pdf'
 FOUNDATIONS[1]['members'].append(dict(name='基本路线完整表述',meaning='领导和团结全国各族人民，以经济建设为中心，坚持四项基本原则，坚持改革开放，自力更生，艰苦创业，为把我国建设成为富强民主文明和谐美丽的社会主义现代化强国而奋斗。'))
 FOUNDATIONS[1]['members'][1]['meaning']='具体为：'+'；'.join(x[0] for x in FOUR)+'。四项基本原则是立国之本。'
 reuse('“三个代表”重要思想','theory-development')
@@ -101,6 +102,9 @@ add('party-terms','四个意识、四个自信与两个维护','party-building/n
 add('strategies','五位一体与四个全面','new-era-framework',[
  ('五位一体总体布局','经济建设、政治建设、文化建设、社会建设、生态文明建设。'),('四个全面战略布局','全面建设社会主义现代化国家、全面深化改革、全面依法治国、全面从严治党。')],
  '总体布局与战略布局是不同层次；新时代的表述不能把“全面建成小康社会”当作当前首项。','将五个建设领域与四项战略举措分别列图。')
+
+FOUNDATIONS[-2]['authority']='https://download.12371.cn/wenjian/2022/11/1/djcbesddz.pdf'
+FOUNDATIONS[-1]['authority']='https://download.12371.cn/wenjian/2022/11/1/djcbesddz.pdf'
 
 def apply_foundations(study,topics):
     by_topic={t['id']:t for t in topics}

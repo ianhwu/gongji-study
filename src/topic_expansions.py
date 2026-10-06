@@ -558,7 +558,7 @@ def compile_topics(study):
         for item in [points[i] for i in t['pointIds']]+[q for q in study['questions'] if q['id'] in t['questionIds']]:
             url=item.get('authority')
             if url and url not in authorities:authorities.append(url)
-        if t['module']=='m02':authorities.insert(0,'https://www.npc.gov.cn/wxzlhgb/c27214/gb2020/202006/P020230313538731037747.pdf')
+        if t['module']=='m02':authorities.insert(0,'https://www.spp.gov.cn/zdgz/202006/t20200602_463886.shtml')
         if t['module']=='m08':authorities.insert(0,'https://www.miit.gov.cn/xwdt/szyw/art/2020/art_6afb8ee6d07540dcacccbeb47dbc0fd4.html')
         if t['id']=='topic-new-era-framework':authorities.insert(0,'https://www.gov.cn/xinwen/2022-10/16/content_5718809.htm')
         t['authorities']=list(dict.fromkeys(authorities))[:3]
