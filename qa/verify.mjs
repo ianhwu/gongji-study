@@ -36,7 +36,12 @@ const api=vm.createContext({Response,Request,URL,Date,Map,Set,JSON,console:{erro
   getChatGPTUser:async()=>user,getRawDb:()=>{if(unavailable) throw new Error('DB unavailable');return db;}});
 vm.runInContext(source+'\nglobalThis.api={GET,POST};',api);
 const request=(body,origin='https://study.test')=>new Request('https://study.test/api/progress',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
-const post=body=>api.api.POST(request(body));
+const post=body=>{
+  const current=rawStudy.questions.find(q=>q.id===body.questionId);
+  if(body.type==='answer' && current?.answers && current.revision && !Object.hasOwn(body,'questionRevision'))
+    body={...body,questionRevision:current.revision};
+  return api.api.POST(request(body));
+};
 user=null; assert.equal((await api.api.GET()).status,401); assert.equal((await post({type:'learn',moduleId:'m01'})).status,401);
 user={userId:'tester-a',email:'a@example.test'};
 assert.equal((await api.api.POST(request({type:'learn',moduleId:'m01'},'https://other.test'))).status,403);
@@ -142,7 +147,9 @@ for(let i=0;i<cycleSize+12;i++) {
  const notes=$('feedback').children.find(el=>el.className==='option-notes');assert.equal(notes.children.length,4);
  const order=JSON.parse(vm.runInContext('JSON.stringify(displayOrder)',context));
  order.forEach((original,display)=>assert.equal(notes.children[display].children[1].textContent,current.optionExplanations[original]));
- assert($('feedback').children.some(el=>el.textContent===current.extension));
+ const guide=study.knowledge.find(p=>p.id===current.concept)?.studyGuide;
+ if(guide)for(const member of guide.members)assert(contentText($('feedback')).includes(member.name),'answer expansion contains every grouped member');
+ else assert($('feedback').children.some(el=>el.textContent===current.extension));
  assert.equal($('nextQuestion').textContent,'下一题');
  vm.runInContext('nextQuestion()',context);
  if(i===cycleSize-3)assert($('practiceStatus').textContent.includes('均已做过'));
@@ -451,3 +458,55 @@ walk($('lessonReturn')).find(e=>e.textContent==='返回刷题').onclick();await 
 browserWindow.history.forward();await settleNavigation();assert.equal(vm.runInContext('currentTopic.id',context),'topic-law-functions','browser forward restores full topic');
 vm.runInContext("openTopic('topic-crime-stages')",context);walk($('lessonReturn')).find(e=>e.textContent==='返回当前题').onclick();assert.equal(practiceSnapshot(),answerBeforeTopic);await drain();assert.equal(JSON.parse(rows.get('frontend-test').state_json).attempts.q001.count,topicAttempt,'reading expanded knowledge does not submit another answer');
 console.log('Topic expansions passed: 62 authored systems, all 721 questions and 1152 points linked, functional diagram assets, safe factual image links, full-topic return and history preserve attempts.');
+
+// Every selection subset must be graded against the requested multiple-question version.
+const refreshedMulti=rawStudy.questions.filter(q=>q.type==='multiple');
+const distribution={2:0,3:0,4:0};
+assert.equal(refreshedMulti.length,62);
+for(const item of refreshedMulti){
+  distribution[item.answers.length]++;
+  assert(item.revision?.startsWith('multi-'));
+  assert.equal(new Set(item.options).size,4);
+  assert.equal(item.optionExplanations.length,4);
+  assert(!JSON.stringify(item).match(/暂不使用|改写审核时|麦克斯韦提出三省|全部文件直接销毁/));
+  user={userId:'multi-subsets-'+item.id,email:'qa@example.test'};
+  for(let mask=0;mask<16;mask++){
+    const choice=item.options.map((_,index)=>index).filter(index=>mask&(1<<index));
+    const response=await post({type:'answer',questionId:item.id,questionRevision:item.revision,choice});
+    if(!mask){assert.equal(response.status,400);continue;}
+    assert.equal(response.status,200);
+    const answer=await response.json();
+    const expected=choice.length===item.answers.length&&item.answers.every(index=>choice.includes(index));
+    assert.equal(answer.correct,expected,`${item.id} subset ${mask}`);
+    assert.deepEqual(answer.state.attempts[item.id].lastChoiceText,choice.map(index=>item.options[index]));
+  }
+  const original=history.find(old=>old.id===item.id&&!old.revision);
+  assert(original,`${item.id}: original answer key retained`);
+  assert.notDeepEqual(item.options,original.options,'rewritten distractors are new content');
+  user={userId:'multi-history-'+item.id,email:'history@example.test'};
+  const legacyResult=await (await post({type:'answer',questionId:item.id,questionRevision:'',choice:original.answers})).json();
+  assert.equal(legacyResult.correct,true,'an open old tab is graded against its own options');
+  assert.equal(legacyResult.state.attempts[item.id].lastQuestionRevision,'legacy');
+  assert.deepEqual(legacyResult.state.attempts[item.id].lastChoiceText,original.answers.map(i=>original.options[i]));
+  const latestResult=await (await post({type:'answer',questionId:item.id,questionRevision:item.revision,choice:item.answers})).json();
+  assert.equal(latestResult.correct,true);
+  assert.equal(latestResult.state.attempts[item.id].count,2,'history remains counted');
+  assert.equal(latestResult.state.attempts[item.id].streak,1,'changed content starts a new mastery streak');
+}
+assert.deepEqual(distribution,{2:40,3:20,4:2});
+const grouped=study.knowledge.filter(p=>p.studyGuide);
+assert.equal(grouped.length,21);
+const principles=study.knowledge.find(p=>p.title==='四项基本原则');
+assert.equal(principles.studyGuide.members.length,4);
+vm.runInContext(`openPoint('${principles.id}')`,context);
+function contentText(node){return [node.textContent||'',...(node.children||[]).map(contentText)].join('\n');}
+const pointText=contentText($('pointLesson'));
+for(const member of principles.studyGuide.members){assert(pointText.includes(member.name));assert(pointText.includes(member.meaning));}
+assert(pointText.includes('易混辨析')&&pointText.includes('怎样记住'));
+const related=study.questions.find(q=>q.concept===principles.id);
+for(const member of principles.studyGuide.members)assert(related.extension.includes(member.name));
+const peace=study.knowledge.find(p=>p.title==='外交和平共处五项原则');
+assert.equal(peace.studyGuide.members.length,5);assert.equal(peace.page,173);
+assert(!peace.statement.includes('勋章'),'foreign policy content no longer confused with awards');
+console.log('Multiple quality passed: 40 two-answer, 20 three-answer, 2 four-answer questions; all 992 subsets checked; all 62 old/new versions remain saveable.');
+console.log('Grouped concepts passed: 21 enriched points; four principles explicitly rendered and included in answer expansion; diplomatic content and source corrected.');

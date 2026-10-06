@@ -28,6 +28,8 @@ pages = json.loads((SRC / "active-data.json").read_text(encoding="utf-8"))
 study = json.loads((SRC / "learning.json").read_text(encoding="utf-8"))
 import sys
 sys.path.insert(0,str(SRC))
+from grouped_concepts import apply_grouped
+apply_grouped(study)
 from reading_edition import compile_editions
 study["readingEdition"], editions = compile_editions(study,pages)
 (DIST / "editions").mkdir(exist_ok=True)

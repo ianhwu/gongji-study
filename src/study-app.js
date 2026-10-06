@@ -467,11 +467,18 @@ function renderLessonPoints(id) {
  const ref=el('details',undefined,'reading-detail');ref.append(el('summary',id==='m14'?'需要核对时：吉林专题官方来源':'需要核对时：本单元的资料章节'));const list=el('div',undefined,'chapter-links');
  for(const c of STUDY.curriculum.filter(c=>c.module===id))list.append(action(`${c.title} · ${sourceMap[c.source].name}`,()=>openChapter(c.id),'btn ghost'));if(id==='m14'){for(const s of STUDY.webSources){const a=el('a',s.name,'btn ghost');a.href=s.url;a.target='_blank';list.append(a);}}ref.append(list);box.append(ref);
 }
+function conceptGuide(guide) {
+ const section=el('section',undefined,'concept-guide');section.setAttribute('aria-label','考点的具体内容');
+ section.append(el('h3','具体内容：逐项记忆'));const list=el('ol',undefined,'concept-members');
+ for(const member of guide.members){const row=el('li');row.append(el('strong',member.name),el('p',member.meaning));list.append(row);}
+ section.append(list,el('h4','易混辨析'),el('p',guide.distinction),el('h4','怎样记住'),el('p',guide.recall,'method-box'));return section;
+}
 function openPoint(id) {
  if(directoryMode!=='subjects'){directoryQuery=null;readerDirectorySource=null;}directoryMode='subjects';
  const p=pointMap.get(id);if(!p)return;captureLessonSections();currentTopic=null;currentPoint=p;currentModule=p.module;currentChapter=null;
  $('moduleLesson').classList.add('hidden');$('chapterLesson').classList.add('hidden');$('pointLesson').classList.remove('hidden');
  const box=$('pointLesson');box.replaceChildren();const nav=el('nav',undefined,'point-navigation');nav.setAttribute('aria-label','考点阅读导航');const path=el('div',undefined,'point-path');path.append(action(moduleMap[p.module].title,()=>openLesson(p.module),'point-breadcrumb'),el('span',pointGroup(p),'point-path-group'),action('目录',()=>{$('courseSidebar').scrollIntoView({block:'start',behavior:'auto'});locateCurrentPoint();},'point-directory-return'));const controls=el('div',undefined,'point-navigation-actions');const points=modulePoints[p.module],index=points.findIndex(item=>item.id===p.id);const previous=action('上一考点',()=>openPoint(points[index-1].id),'btn ghost'),next=action('下一考点',()=>openPoint(points[index+1].id),'btn secondary');previous.disabled=index===0;next.disabled=index===points.length-1;controls.append(el('span',`${index+1} / ${points.length}`,'point-position'),previous,next);nav.append(path,controls);box.append(nav);box.append(el('span',moduleMap[p.module].title,'badge'),el('h2',p.title),el('p',p.statement,'thesis'));
+ if(p.studyGuide)box.append(conceptGuide(p.studyGuide));
  const pictures=pointPictures([p.id]);if(pictures.length)box.append(el('h3','图片对照'),visualGallery(pictures));
  const topic=topicMap.get(STUDY.pointTopics?.[p.id]);if(topic)box.append(topicExpansion(topic,{excludeVisualIds:pictures.map(v=>v.id)}));
  if(p.checkedAt)box.append(el('p',`官方资料核对：${p.checkedAt}${p.dataYear?' · 数据所属年度：'+p.dataYear:''}`,'muted small'));
@@ -678,7 +685,11 @@ function renderAnswer(originalIndex){
   const extension = document.createElement('p'); extension.textContent = q.extension;
   const source = document.createElement('a'); source.href = sourceLink(q.source, q.page); source.target = '_blank';
   source.textContent = `查看出处：${referenceLabel(q.source,q.page)} ↗`;
-  feedback.append(lead, explanation, optionHeading, optionNotes, extensionHeading, extension, source);
+  feedback.append(lead, explanation, optionHeading, optionNotes);
+  const groupedPoint=pointMap.get(q.concept);
+  if(groupedPoint?.studyGuide)feedback.append(conceptGuide(groupedPoint.studyGuide));
+  else feedback.append(extensionHeading,extension);
+  feedback.append(source);
   const pictures=pointPictures(q.pointIds||[]);if(pictures.length)feedback.append(el('h3','看图巩固本题考点'),visualGallery(pictures));
   const topic=topicMap.get(STUDY.questionTopics?.[q.id]);if(topic)feedback.append(topicExpansion(topic,{excludeVisualIds:pictures.map(v=>v.id)}));
   for(const ref of q.extraRefs||[]){if(ref.source===q.source&&ref.page===q.page)continue;const link=el('a',`其他依据：${referenceLabel(ref.source,ref.page)}`);link.href=sourceLink(ref.source,ref.page);link.target='_blank';feedback.append(el('p'),link);}

@@ -29,6 +29,7 @@ type Row = { state_json: string; revision: number };
 type Question = { id: string; options: string[]; answer: number; answers?: number[]; revision?: string };
 const questions = new Map<string, Question>(learning.questions.map((question) => [question.id, question]));
 const legacyQuestions = new Map<string, Question>(history.map(question => [question.id, question]));
+const questionVersions = new Map<string, Question>(history.map(question => [JSON.stringify([question.id, question.revision || ""]), question]));
 type Chapter = { id: string; start: number; end: number };
 const curriculum = [...learning.curriculum, ...learning.books] as Chapter[];
 const modules = new Set([...learning.modules.map((module) => module.id), ...curriculum.map((chapter) => chapter.id), ...learning.knowledge.map((point) => point.id)]);
@@ -116,8 +117,14 @@ function applyAction(state: StudyState, action: Record<string, unknown>) {
     case "answer": {
       const id = String(action.questionId || "");
       const currentQuestion = questions.get(id);
-      const question = action.questionRevision === undefined && legacyQuestions.has(id) ? legacyQuestions.get(id) : currentQuestion;
-      if (action.questionRevision !== undefined && action.questionRevision !== (currentQuestion?.revision || "")) throw new Error("Question revised");
+      const requestedRevision = action.questionRevision;
+      if (requestedRevision !== undefined && typeof requestedRevision !== "string") throw new Error("Question revised");
+      const question = requestedRevision === undefined
+        ? (legacyQuestions.get(id) ?? currentQuestion)
+        : currentQuestion && requestedRevision === (currentQuestion.revision || "")
+          ? currentQuestion
+          : questionVersions.get(JSON.stringify([id, requestedRevision]));
+      if (requestedRevision !== undefined && !question) throw new Error("Question revised");
       if (!question) throw new Error("Invalid answer");
       const rawChoice = action.choice;
       const choices = question.answers ? rawChoice : [rawChoice];
@@ -133,13 +140,14 @@ function applyAction(state: StudyState, action: Record<string, unknown>) {
         state.deviceCursors[action.deviceId] = Number(action.sequence);
       }
       const old = state.attempts[id] || { count: 0, wrong: 0, streak: 0 };
-      const streak = correct ? old.streak + 1 : 0;
+      const questionRevision = question.revision || (legacyQuestions.has(id) ? "legacy" : "");
+      const streak = correct ? (old.lastQuestionRevision === questionRevision ? old.streak : 0) + 1 : 0;
       const intervals = [0, 1, 3, 7, 14, 30];
       const now = Date.now();
       state.attempts[id] = {
         count: old.count + 1,
         wrong: old.wrong + (correct ? 0 : 1),
-        lastQuestionRevision: question.revision || (legacyQuestions.has(id) ? "legacy" : ""),
+        lastQuestionRevision: questionRevision,
         lastChoiceText: (choices as number[]).map(index=>question.options[index]),
         streak, lastCorrect: correct, lastChoice: question.answers ? [...choices].sort((a,b)=>Number(a)-Number(b)) as number[] : rawChoice as number, lastAt: now,
         due: correct ? now + intervals[Math.min(streak, 5)] * 86400000 : now,

@@ -73,7 +73,7 @@ add('management-scope','m09',['管理层次','管理幅度'],'关于组织的管
 add('decision-plan','m09',['决策','非程序化决策'],'关于决策与计划，哪些判断正确？',
  ['决策是计划的前提','计划是决策的逻辑延续','非程序化决策处理较少出现且不确定的新问题','所有决策都可无条件套用固定程序'],[0,1,2],
  ['先选择目标与方案，计划再具体安排实现步骤。','计划把选定方向转成任务和资源安排。','新问题的条件不明确，需要分析与判断，不能仅机械照办。','程序化与非程序化决策有区别，固定程序不适合所有问题。'],'先选方向，再排步骤；新问题先识别不确定性，避免套用旧程序。')
-add('management-bias','m09',['晕轮效应（光环效应）本质上','木桶原理（短板效应）'],'面对评价与改进问题，哪些判断合理？',
+add('management-bias','m09',['晕轮效应','木桶原理（短板效应）'],'面对评价与改进问题，哪些判断合理？',
  ['因一个优点推定所有方面优秀可能是晕轮效应','短板效应提示应识别制约整体的薄弱环节','任何一个局部指标都能完整代表整体','评价时应核对多个独立维度'],[0,1,3],
  ['以点代面会使其他方面的评价失真。','薄弱环节可能制约整体，需要结合具体系统判断。','把局部直接等同整体，正是需要避免的推断。','多维证据有助于减少单一印象主导判断的偏误。'],'先列评价维度，再检查薄弱环节；不要用一个亮点替代完整证据。')
 add('document-drafting','m08',['公文拟制'],'公文拟制包括哪些程序？',
@@ -193,6 +193,12 @@ add('jl-targets','m14',['@target-gdp2026','@target-industry2026','@target-consum
  ['GDP增长—5%左右','规上工业增加值增长—6%左右','社零总额增长—5%左右','所有年度预期目标都是已经完成的全年实绩'],[0,1,2],
  ['这是报告提出的GDP年度预期目标，不是完成值。','6%左右对应规上工业增加值，不能与GDP目标串位。','社零目标虽与GDP数字相近，指标含义不同。','目标是预期状态，不能据此宣布年度已完成。'],'数字相同也不能合并指标；先配指标，再核对数据状态。')
 
+from multiple_revisions import apply_revisions
+import hashlib
+import json
+
+apply_revisions(ROWS)
+
 def extend_multiple(study):
  study['questions']=[q for q in study['questions'] if not q['id'].startswith('ms-')]
  for p in study['knowledge']:p['questionIds']=[id for id in p['questionIds'] if not id.startswith('ms-')]
@@ -209,7 +215,9 @@ def extend_multiple(study):
   first=points[0];qid='ms-'+row['slug']
   evidence=list({(p['source'],p['page']):dict(source=p['source'],page=p['page']) for p in points}.values())
   q=dict(id=qid,type='multiple',answers=row['answers'],answer=row['answers'][0],module=row['module'],concept=first['id'],pointIds=[p['id'] for p in points],source=first['source'],page=first['page'],prompt=row['prompt'],options=row['options'],optionExplanations=row['notes'],explanation='正确理解包括：'+'；'.join(row['options'][i] for i in row['answers'])+'。',extension=row['method'],extraRefs=evidence,kind='authored-multiple')
+  q['revision']='multi-'+hashlib.sha256(json.dumps([row['prompt'],row['options'],row['answers']],ensure_ascii=False,separators=(',',':')).encode()).hexdigest()[:16]
   if first.get('authority'):q['authority']=first['authority']
+  if row.get('authority'):q['authority']=row['authority']
   study['questions'].append(q)
   for p in points:p['questionIds'].append(qid)
  study['coverage']['questions']=len(study['questions'])
