@@ -79,6 +79,10 @@ for(const [oldId,newId] of Object.entries(STUDY.readingAliases||{}))if(chapterMa
 let queue = [], questionVisits = [], practicePool = [], at = 0, sessionCorrect = 0, answered = false;
 let endless = true, sessionAnswered = 0, displayCorrectIndex = 0, displayOrder = [];
 let recentQuestions = [], lastConcept = null, selectedChoices = new Set();
+let practiceActive = false;
+const navigationSessionId=crypto.randomUUID();
+let navigationEntries = [{route:{view:'home'},scroll:0}], navigationIndex = 0;
+let navigationInitializing = true, navigationRestoring = false, navigationRestoreVersion = 0;
 const correctChoices = q => q.answers || [q.answer];
 function choiceCorrect(q,choice) {const selected=Array.isArray(choice)?choice:[choice],expected=correctChoices(q);return selected.length===expected.length&&expected.every(index=>selected.includes(index));}
 function typeFiltered(items) {const type=$('quizType').value||'mixed';return items.filter(q=>type==='mixed'||(type==='multiple')===!!q.answers);}
@@ -235,17 +239,99 @@ function selectNextQuestion() {
   return shuffle(candidates)[0];
 }
 
-function show(view,scroll=true) {
-  document.querySelectorAll('.view').forEach((el) => el.classList.toggle('active', el.id === view));
-  document.querySelectorAll('.nav button[data-view]').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
-  if (view === 'home') renderHome();
-  if (view === 'library') renderLibrary();
-  if (view === 'wrong') renderWrong();
-  if (view === 'quiz') showQuizSetup();
-  if (view === 'tools') renderTools();
-  if (view === 'coverage') renderCoverage();
-  if(scroll)window.scrollTo({ top: 0, behavior: 'smooth' });
+function navigationUrl(route) {
+ const params=new URLSearchParams();
+ params.set('view',route.view);
+ if(route.point)params.set('point',route.point);
+ if(route.module)params.set('module',route.module);
+ if(route.chapter){params.set('chapter',route.chapter);params.set('page',route.page);}
+ if(route.setup)params.set('setup','1');
+ return (window.location.pathname||'study.html')+'?'+params.toString();
 }
+function saveNavigationEntry() {
+ const entry=navigationEntries[navigationIndex];
+ entry.scroll=window.scrollY||0;entry.sidebarScroll=$('courseSidebar').scrollTop||0;
+ entry.timeline=selectedTimeline;
+ entry.coverage={module:$('coverageModule').value,status:$('coverageStatus').value,search:$('coverageSearch').value,limit:coverageLimit};
+}
+function rememberNavigation(route) {
+ if(navigationRestoring)return;
+ if(navigationInitializing){navigationEntries[0]={route,scroll:0};window.history?.replaceState({gongjiStudyNavigation:navigationSessionId,index:0},'',navigationUrl(route));return;}
+ if(JSON.stringify(navigationEntries[navigationIndex].route)===JSON.stringify(route))return;
+ saveNavigationEntry();navigationEntries.splice(navigationIndex+1);navigationEntries.push({route,scroll:0});navigationIndex++;
+ window.history?.pushState({gongjiStudyNavigation:navigationSessionId,index:navigationIndex},'',navigationUrl(route));
+}
+function updateReadingNavigation() {
+ const entry=navigationEntries[navigationIndex];
+ if(entry.route.chapter===currentChapter?.id){entry.route.page=chapterPage;window.history?.replaceState({gongjiStudyNavigation:navigationSessionId,index:navigationIndex},'',navigationUrl(entry.route));}
+}
+function returnLabel(route) {
+ if(route.view==='quiz')return !practiceActive?'返回练习方式':route.setup?'返回练习设置':'返回刷题';
+ if(route.point)return '返回知识点';
+ if(route.chapter)return '返回资料阅读';
+ return {home:'返回学科目录',lesson:'返回课程讲解',library:'返回资料目录',wrong:'返回错题复习',coverage:'返回知识点覆盖',tools:'返回时间线与方法'}[route.view]||'返回上一页';
+}
+function renderNavigationReturn(view) {
+ const previous=navigationEntries[navigationIndex-1];
+ for(const id of ['navigationReturn','lessonReturn']){
+  const box=$(id);box.replaceChildren();
+  if(previous)box.append(action(returnLabel(previous.route),goBack,'btn secondary'));
+  if(practiceActive&&view!=='quiz'&&previous?.route.view!=='quiz')box.append(action('返回当前题',resumePractice,'btn'));
+  box.classList.toggle('hidden',!box.children.length||(id==='navigationReturn'&&view==='lesson'));
+ }
+ $('lesson').classList.toggle('has-return-navigation',!!$('lessonReturn').children.length);
+ $('resumePractice').classList.toggle('hidden',!practiceActive);
+ $('homeEndless').textContent=practiceActive?'继续当前练习':'一直随机刷题';
+ $('startEndless').textContent=practiceActive?'重新开始随机刷题':'一直随机刷题';
+}
+async function restoreNavigation(index) {
+ const entry=navigationEntries[index];if(!entry)return;
+ saveNavigationEntry();navigationIndex=index;navigationRestoring=true;const version=++navigationRestoreVersion;
+ try {
+  const route=entry.route;selectedTimeline=entry.timeline||selectedTimeline;
+  if(entry.coverage){for(const [name,id] of [['module','coverageModule'],['status','coverageStatus'],['search','coverageSearch']])$(id).value=entry.coverage[name];coverageLimit=entry.coverage.limit;}
+  if(route.point)openPoint(route.point);
+  else if(route.chapter)await openChapter(route.chapter,route.page);
+  else if(route.module)openLesson(route.module);
+  else if(route.view==='lesson')openCourses();
+  else show(route.view,false,route);
+  if(version!==navigationRestoreVersion)return;
+  $('courseSidebar').scrollTop=entry.sidebarScroll||0;window.scrollTo({top:entry.scroll||0,behavior:'auto'});
+ } finally {if(version===navigationRestoreVersion){navigationRestoring=false;renderNavigationReturn(entry.route.view);}}
+}
+function goBack() {
+ if(navigationIndex<=0)return;
+ if(window.history?.back)window.history.back();
+ else void restoreNavigation(navigationIndex-1);
+}
+window.addEventListener('popstate',event=>{
+ if(event.state?.gongjiStudyNavigation===navigationSessionId&&navigationEntries[event.state.index])void restoreNavigation(event.state.index);
+ else window.location.reload?.();
+});
+function show(view,scroll=true,route={view}) {
+ rememberNavigation(route);
+ document.querySelectorAll('.view').forEach((el) => el.classList.toggle('active', el.id === view));
+ document.querySelectorAll('.nav button[data-view]').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
+ if (view === 'home') renderHome();
+ if (view === 'library') renderLibrary();
+ if (view === 'wrong') renderWrong();
+ if (view === 'quiz') {
+  if(practiceActive&&!route.setup){$('quizSetup').classList.add('hidden');$('quizPlay').classList.remove('hidden');}
+  else showQuizSetup();
+ }
+ if (view === 'tools') renderTools();
+ if (view === 'coverage') renderCoverage();
+ renderNavigationReturn(view);
+ if(scroll)window.scrollTo({ top: 0, behavior: 'auto' });
+}
+function resumePractice() {
+ if(!practiceActive)return false;
+ const entry=[...navigationEntries.slice(0,navigationIndex+1)].reverse().find(e=>e.route.view==='quiz'&&!e.route.setup);
+ show('quiz',false);window.scrollTo({top:entry?.scroll||0,behavior:'auto'});return true;
+}
+function openPractice(){if(!resumePractice())startEndless();}
+function showPracticeSettings(){show('quiz',true,{view:'quiz',setup:true});}
+function endPractice(){practiceActive=false;show('home');}
 
 function renderHome() {
  $('statLessons').textContent=Object.keys(state.learned).filter(id=>state.learned[id]&&(moduleMap[id]||pointMap.has(id)||chapterMap[id])).length;
@@ -319,7 +405,7 @@ function locateCurrentPoint(){
  else unit?.scrollIntoView({block:'nearest',behavior:'auto'});
  captureDirectory();saveCourseNavigation();
 }
-function showCourseContent(target){show('lesson',false);$(target).scrollIntoView({behavior:'auto',block:'start'});}
+function showCourseContent(target){const route=target==='pointLesson'?{view:'lesson',point:currentPoint.id}:target==='chapterLesson'?{view:'lesson',chapter:currentChapter.id,page:chapterPage}:{view:'lesson',module:currentModule};show('lesson',false,route);($('lessonReturn').children.length?$('courseContent'):$(target)).scrollIntoView({behavior:'auto',block:'start'});}
 function renderGuide(id) {
  const g=STUDY.guides[id],box=$('lessonGuide');box.replaceChildren();
  box.append(el('p',g.thesis,'thesis'));box.append(el('h3','理解这门课的主线'));
@@ -455,7 +541,7 @@ function renderChapter() {
 async function turnChapterPage(delta) {
   if (!currentChapter) return;
   const chapter=currentChapter,available=chapterReadingPages(chapter),index=available.indexOf(chapterPage),page=available[Math.max(0,Math.min(available.length-1,index+delta))];
-  chapterPage = page; renderChapter(); $('chapterBody').scrollIntoView({behavior:'auto',block:'start'});
+  chapterPage = page; updateReadingNavigation(); renderChapter(); $('chapterBody').scrollIntoView({behavior:'auto',block:'start'});
   if (signedIn && accountReady) {
     try { await persist({ type:'read', chapterId:chapter.id, page }); }
     catch (error) { notice('阅读位置未同步：' + error.message); }
@@ -466,7 +552,8 @@ function showQuizSetup() { $('bankInfo').textContent = `题库共 ${STUDY.questi
 function startQuiz(items, mode = 'endless') {
   if (!requireAccount()) return;
   if(mode!=='specific')items=typeFiltered(items);
-  if (!items.length) { notice('当前题型和范围没有可练题目，请切换题型或范围。'); show('quiz'); return; }
+  if (!items.length) { notice('当前题型和范围没有可练题目，请切换题型或范围。'); showPracticeSettings(); return; }
+  practiceActive=true;
   endless = true; practicePool = items;
   recentQuestions = []; lastConcept = null;
   queue = [selectNextQuestion()]; questionVisits = [];
@@ -617,10 +704,10 @@ function renderWrong() {
   }
 }
 for (const button of document.querySelectorAll('.nav button[data-view]')) {
-  button.onclick = () => button.dataset.view === 'lesson' ? openCourses() : button.dataset.view === 'quiz' ? startEndless() : show(button.dataset.view);
+  button.onclick = () => button.dataset.view === 'lesson' ? openCourses() : button.dataset.view === 'quiz' ? openPractice() : show(button.dataset.view);
 }
-$('searchLink').onclick = () => { window.location.href = 'search.html'; };
-$('homeEndless').onclick = startEndless;
+$('searchLink').onclick = () => { window.open('search.html','_blank','noopener'); };
+$('homeEndless').onclick = openPractice;
 $('homeWrong').onclick = () => startQuiz(wrongQuestions());
 for (const module of STUDY.modules) {
   for (const id of ['lessonSelect', 'quizModule']) {
@@ -640,8 +727,9 @@ $('startDue').onclick = () => startQuiz(shuffle(dueQuestions()));
 $('nextQuestion').onclick = nextQuestion;
 $('previousQuestion').onclick = previousQuestion;
 $('submitAnswer').onclick = submitMultiple;
-$('practiceSettings').onclick = () => show('quiz');
-$('exitQuiz').onclick = () => show('home');
+$('practiceSettings').onclick = showPracticeSettings;
+$('resumePractice').onclick = resumePractice;
+$('exitQuiz').onclick = endPractice;
 $('practiceWrong').onclick = () => startQuiz(shuffle(wrongQuestions()));
 $('practiceDue').onclick = () => startQuiz(shuffle(dueQuestions()));
 $('chapterPrevious').onclick = () => turnChapterPage(-1);
@@ -800,6 +888,10 @@ function renderReadingChapter(chapter){
 function moveReadingChapter(delta){const chapters=readingChapters(currentChapter?.source||readingSource),index=chapters.findIndex(c=>c.id===currentChapter?.id),target=chapters[index+delta];if(target)openChapter(target.id);}
 
 renderHome(); loadAccount();
-const initialModule=new URLSearchParams(window.location.search||'').get('module');if(moduleMap[initialModule])openLesson(initialModule);
-
-const readingParams=new URLSearchParams(window.location.search||'');if(readingParams.get('view')==='library')show('library');else if(chapterMap[readingParams.get('chapter')])openChapter(readingParams.get('chapter'),Number(readingParams.get('page'))||undefined);
+const readingParams=new URLSearchParams(window.location.search||''),initialView=readingParams.get('view');
+if(pointMap.has(readingParams.get('point')))openPoint(readingParams.get('point'));
+else if(chapterMap[readingParams.get('chapter')])openChapter(readingParams.get('chapter'),Number(readingParams.get('page'))||undefined);
+else if(moduleMap[readingParams.get('module')])openLesson(readingParams.get('module'));
+else if(['home','library','quiz','wrong','tools','coverage'].includes(initialView))show(initialView,true,initialView==='quiz'&&readingParams.get('setup')==='1'?{view:'quiz',setup:true}:{view:initialView});
+else show('home',false);
+navigationInitializing=false;

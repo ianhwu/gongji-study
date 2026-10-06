@@ -91,7 +91,13 @@ const views=['home','lesson','quiz','wrong','tools','coverage','library'].map($)
 const nav=['home','lesson','quiz','wrong','tools','coverage','library'].map(view=>{const e=new Element();e.dataset.view=view;return e});
 const document={getElementById:$,createElement:tag=>{const e=new Element();e.tag=tag;return e},createTextNode:text=>({textContent:text}),querySelectorAll:selector=>selector==='.view'?views:nav};
 let loseResponse=false,delayAnswer=false,releaseAnswer;const drafts=new Map();
-const context=vm.createContext({document,window:{location:{search:'?module=m14'},scrollTo(){},addEventListener(){}},localStorage:{getItem:k=>drafts.get(k)||null,setItem:(k,v)=>drafts.set(k,v),removeItem:k=>drafts.delete(k)},crypto:webcrypto,URLSearchParams,Date,Math,Map,JSON,console,setTimeout,clearTimeout,
+const browserEvents=new Map(),browserEntries=[];let browserIndex=0;
+const browserWindow={location:{search:'?module=m14',pathname:'/study.html'},scrollY:0,
+ open(url,target,features){this.opened={url,target,features};},scrollTo({top}){this.scrollY=top;},addEventListener(name,listener){browserEvents.set(name,listener);},
+ history:{replaceState(state,unused,url){browserEntries[browserIndex]={state,url};},pushState(state,unused,url){browserEntries.splice(browserIndex+1);browserEntries.push({state,url});browserIndex++;},
+ back(){if(browserIndex){browserIndex--;browserEvents.get('popstate')({state:browserEntries[browserIndex].state});}},
+ forward(){if(browserIndex+1<browserEntries.length){browserIndex++;browserEvents.get('popstate')({state:browserEntries[browserIndex].state});}}}};
+const context=vm.createContext({document,window:browserWindow,localStorage:{getItem:k=>drafts.get(k)||null,setItem:(k,v)=>drafts.set(k,v),removeItem:k=>drafts.delete(k)},crypto:webcrypto,URLSearchParams,Date,Math,Map,JSON,console,setTimeout,clearTimeout,
   fetch:async(url,options={})=>{
     if(url.startsWith('references/')||url.startsWith('editions/'))return Response.json(JSON.parse(fs.readFileSync('public/'+url.split('?')[0],'utf8')));
     if (options.method==='POST') {if(delayAnswer){delayAnswer=false;await new Promise(resolve=>releaseAnswer=resolve);}const response=await api.api.POST(request(JSON.parse(options.body)));if(loseResponse){loseResponse=false;throw new Error('network response lost')}return response;}
@@ -394,3 +400,36 @@ for(const name of ['top','bottom']){const pages=JSON.parse(fs.readFileSync('publ
 await vm.runInContext("openChapter('chapter-bottom-258',262)",context);assert(walk($('chapterBody')).some(e=>e.tag==='img'&&e.src==='images/reading/bottom/262.jpg'));assert(!walk($('chapterBody')).some(e=>e.textContent?.includes('全老维')),'diagram OCR is not presented as prose');
 await vm.runInContext("openChapter('chapter-top-83')",context);assert.equal(vm.runInContext('currentChapter.id',context),'chapter-top-84','old outline link resolves to useful content');
 console.log('Original page screenshot and removed-chapter compatibility checks passed.');
+
+// Returning from teaching is navigation, never a new practice session or answer.
+const settleNavigation=async()=>{for(let i=0;i<100;i++){if(!vm.runInContext('navigationRestoring',context))return;await new Promise(r=>setTimeout(r,1));}throw new Error('navigation restore stalled');};
+const quizNav=nav.find(button=>button.dataset.view==='quiz');
+const practiceSnapshot=()=>vm.runInContext('JSON.stringify({queue:queue.map(q=>q.id),visits:questionVisits,pool:practicePool.map(q=>q.id),at,answered,displayOrder,selected:[...selectedChoices],sessionAnswered,sessionCorrect})',context);
+const linkedSingle=study.questions.find(q=>!q.answers&&q.pointIds?.some(id=>study.knowledge.some(p=>p.id===id)));
+vm.runInContext(`startQuiz([questionMap.get('${linkedSingle.id}')],'specific')`,context);answerQuestion(linkedSingle,[(linkedSingle.answer+1)%4]);await drain();
+const beforeTeaching=practiceSnapshot(),originalFeedback=$('feedback').children[0],originalAttempt=JSON.parse(rows.get('frontend-test').state_json).attempts[linkedSingle.id].count;
+browserWindow.scrollY=1234;
+walk($('feedback')).find(e=>e.textContent==='回到本题知识点讲解').onclick();
+assert(walk($('lessonReturn')).some(e=>e.textContent==='返回刷题'),'teaching provides visible return to quiz');
+assert(browserEntries[browserIndex].url.includes('point='),'knowledge route is represented in browser URL');
+browserWindow.history.back();await settleNavigation();
+assert.equal(practiceSnapshot(),beforeTeaching);assert.equal($('feedback').children[0],originalFeedback,'return retains the existing explanation DOM');assert.equal(browserWindow.scrollY,1234,'return restores quiz reading position');assert(!$('quizPlay').className.includes('hidden'));
+browserWindow.history.forward();await settleNavigation();assert(!$('pointLesson').className.includes('hidden'));
+quizNav.onclick();assert.equal(practiceSnapshot(),beforeTeaching,'top quiz nav resumes without resetting questions');
+vm.runInContext(`openPoint('${linkedSingle.pointIds[0]}')`,context);
+const sibling=study.knowledge.find(p=>p.module===linkedSingle.module&&p.id!==linkedSingle.pointIds[0]);vm.runInContext(`openPoint('${sibling.id}')`,context);
+walk($('lessonReturn')).find(e=>e.textContent==='返回当前题').onclick();assert.equal(practiceSnapshot(),beforeTeaching,'browsing further knowledge points retains a direct return');
+$('searchLink').onclick();assert.deepEqual(browserWindow.opened,{url:'search.html',target:'_blank',features:'noopener'});assert.equal(practiceSnapshot(),beforeTeaching,'full-text search leaves current question intact');
+$('practiceSettings').onclick();assert(!$('quizSetup').className.includes('hidden'));assert(!$('resumePractice').className.includes('hidden'));$('resumePractice').onclick();assert.equal(practiceSnapshot(),beforeTeaching,'settings can resume the unfinished session');
+assert.equal(JSON.parse(rows.get('frontend-test').state_json).attempts[linkedSingle.id].count,originalAttempt,'all return paths create no extra answer writes');
+vm.runInContext(`startQuiz([questionMap.get('${priorMulti.id}')],'specific')`,context);$('options').children[0].onclick();$('options').children[2].onclick();
+const draftBeforeTeaching=practiceSnapshot();vm.runInContext(`openPoint('${linkedSingle.pointIds[0]}')`,context);quizNav.onclick();assert.equal(practiceSnapshot(),draftBeforeTeaching,'unsubmitted multi selection survives lesson navigation');assert(!$('submitAnswer').disabled);
+$('exitQuiz').onclick();assert.equal(vm.runInContext('practiceActive',context),false);assert($('resumePractice').className.includes('hidden'),'explicit exit ends resumption');
+await vm.runInContext("openChapter('chapter-bottom-258',262)",context);await vm.runInContext('turnChapterPage(1)',context);
+walk($('chapterGuide')).find(e=>e.textContent==='查看讲解与练习').onclick();assert(walk($('lessonReturn')).some(e=>e.textContent==='返回资料阅读'));
+walk($('lessonReturn')).find(e=>e.textContent==='返回资料阅读').onclick();await settleNavigation();assert.equal(vm.runInContext('chapterPage',context),263,'PDF back restores the latest page rather than chapter start');assert.equal(vm.runInContext('currentChapter.id',context),'chapter-bottom-258');
+$('coverageModule').value=linkedSingle.module;$('coverageStatus').value='all';$('coverageSearch').value=study.knowledge.find(p=>p.id===linkedSingle.pointIds[0]).title;vm.runInContext("show('coverage')",context);browserWindow.scrollY=777;
+vm.runInContext(`openPoint('${linkedSingle.pointIds[0]}')`,context);walk($('lessonReturn')).find(e=>e.textContent==='返回知识点覆盖').onclick();await settleNavigation();assert.equal($('coverageSearch').value,study.knowledge.find(p=>p.id===linkedSingle.pointIds[0]).title);assert.equal(browserWindow.scrollY,777);
+vm.runInContext("show('wrong')",context);walk($('wrongList')).find(e=>e.textContent==='重做此题').onclick();
+assert(walk($('navigationReturn')).some(e=>e.textContent==='返回错题复习'));walk($('navigationReturn')).find(e=>e.textContent==='返回错题复习').onclick();await settleNavigation();assert(views.find(e=>e.id==='wrong').className.includes('active'));
+console.log('Navigation passed: answer-to-knowledge return, browser back/forward, active quiz resumption, multi drafts, no duplicate writes, settings/exit, PDF page and coverage/wrong-list return.');
