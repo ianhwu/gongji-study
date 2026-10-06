@@ -75,6 +75,7 @@ function topicExpansion(t,{excludeVisualIds=[],full=false}={}){
  section.append(el('h4','把知识连起来'),el('p',t.connection),el('h4','易混点与适用边界'),el('p',t.boundary),el('h4','换个条件怎么考'),el('p',t.variant));
  const pictures=t.visualIds.map(id=>visualReferences.find(v=>v.id===id)).filter(v=>v&&!excludeVisualIds.includes(v.id));
  if(pictures.length){section.append(el('h4','图片与知识对照'),visualGallery(pictures.slice(0,4)));if(pictures.length>4){const more=el('details',undefined,'reading-detail');more.append(el('summary',`再看 ${pictures.length-4} 张相关图片`),visualGallery(pictures.slice(4)));section.append(more);}}
+ if(full){const materials=markCourseReferences(t);if(materials)section.append(materials);}
  if(t.sourceFigures?.length){const originals=el('details',undefined,'reading-detail');originals.append(el('summary','对照学霸笔记中的相关原页图表'));for(const info of t.sourceFigures)originals.append(sourcePageFigure(info,referenceLabel(info.source,info.page)+' · 相关章节图表'));section.append(originals);}
  const recall=el('details',undefined,'reading-detail topic-recall');recall.append(el('summary','合上解析，试着复述这组知识'),el('p',t.recall));section.append(recall);
  const related=t.pointIds.map(id=>pointMap.get(id)).filter(p=>p&&p.status!=='needs-review');
@@ -291,6 +292,8 @@ function navigationUrl(route) {
  if(route.module)params.set('module',route.module);
  if(route.chapter){params.set('chapter',route.chapter);params.set('page',route.page);}
  if(route.setup)params.set('setup','1');
+ if(route.doc)params.set('doc',route.doc);
+ if(route.unit)params.set('unit',route.unit);
  return (window.location.pathname||'study.html')+'?'+params.toString();
 }
 function saveNavigationEntry() {
@@ -315,7 +318,7 @@ function returnLabel(route) {
  if(route.point)return '返回知识点';
  if(route.topic)return '返回知识专题';
  if(route.chapter)return '返回资料阅读';
- return {home:'返回学科目录',lesson:'返回课程讲解',library:'返回资料目录',wrong:'返回错题复习',coverage:'返回知识点覆盖',tools:'返回时间线与方法'}[route.view]||'返回上一页';
+ return {home:'返回学科目录',lesson:'返回课程讲解',library:'返回资料目录',materials:'返回马克资料',wrong:'返回错题复习',coverage:'返回知识点覆盖',tools:'返回时间线与方法'}[route.view]||'返回上一页';
 }
 function renderNavigationReturn(view) {
  const previous=navigationEntries[navigationIndex-1];
@@ -361,6 +364,7 @@ function show(view,scroll=true,route={view}) {
  document.querySelectorAll('.nav button[data-view]').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
  if (view === 'home') renderHome();
  if (view === 'library') renderLibrary();
+ if (view === 'materials') void renderMark(route);
  if (view === 'wrong') renderWrong();
  if (view === 'quiz') {
   if(practiceActive&&!route.setup){$('quizSetup').classList.add('hidden');$('quizPlay').classList.remove('hidden');}
@@ -387,6 +391,7 @@ function renderHome() {
  $('contentCoverage').textContent=`${STUDY.modules.length} 个课程单元 · ${STUDY.knowledge.length} 个已整理考点 · ${STUDY.questions.length} 道题 · ${STUDY.curriculum.length} 个资料章节。${STUDY.coverage.withQuestions} 个考点均已配练习；在“知识点覆盖”查看各考点题目和已练进度。`;
  const sources=$('sourceCoverage');sources.replaceChildren();
  if(STUDY.coverage.jilinPoints){const p=el('p','吉林省情专题');p.append(el('span',`${STUDY.coverage.jilinPoints} 个考点 · ${STUDY.coverage.jilinQuestions} 道原创练习 · ${STUDY.webSources.length} 项官方来源`));sources.append(p);}
+ if(markLibrary.documents.length){const p=el('p','马克资料合集');p.append(el('span',`${markLibrary.stats.files} 份非视频文件 · ${markLibrary.stats.documents} 组学习资料 · ${markLibrary.stats.units} 节`),action('打开学习馆',()=>openMark(),'point-link'));sources.append(p);}
  for(const source of STUDY.sources){const p=el('p',source.name);p.append(el('span',`${source.pages} 页可读资料 · ${STUDY.questions.filter(q=>q.source===source.id).length} 道题附出处`));sources.append(p);}
  const grid=$('moduleGrid');grid.className='subject-grid';grid.replaceChildren();
  SUBJECTS.forEach(([title,ids],index)=>{
@@ -892,6 +897,7 @@ function openReadingBook(source){
 }
 function renderLibrary(){
  const box=$('bookLibrary');box.replaceChildren();
+ if(markLibrary.documents.length){const card=el('article',undefined,'book-card mark-library-entry');const text=el('div');text.append(el('p','新资料合集','topic-eyebrow'),el('h3','马克资料学习馆'),el('p',`${markLibrary.stats.documents} 组资料 · 系统讲义、86专题、导图、笔记、时政与题本`),action('进入学习馆',()=>openMark(),'btn'));card.append(text);box.append(card);}
  for(const source of ['top','bottom','tricolor','color','mindmap'].map(id=>sourceMap[id]).filter(Boolean)){
   const chapters=readingChapters(source.id),card=el('article',undefined,'book-card');const cover=el('div',undefined,'book-cover');cover.setAttribute('aria-hidden','true');cover.append(el('small','PUBLIC KNOWLEDGE'),el('span',source.id==='top'?'学霸\n上册':source.id==='bottom'?'学霸\n下册':source.id==='mindmap'?'思维\n导图':source.id==='tricolor'?'三色\n笔记':'彩色\n笔记'));card.append(cover);
   const text=el('div');text.append(el('h3',source.name),el('p',`${chapters.length} 章 · ${source.readingPages||source.pages} 页学习正文`,'book-meta'),el('p',bookDescriptions[source.id],'book-description'));
@@ -965,12 +971,14 @@ function renderReadingChapter(chapter){
 }
 function moveReadingChapter(delta){const chapters=readingChapters(currentChapter?.source||readingSource),index=chapters.findIndex(c=>c.id===currentChapter?.id),target=chapters[index+delta];if(target)openChapter(target.id);}
 
+/*__MARK_APP__*/
 renderHome(); loadAccount();
 const readingParams=new URLSearchParams(window.location.search||''),initialView=readingParams.get('view');
 if(topicMap.has(readingParams.get('topic')))openTopic(readingParams.get('topic'));
 else if(pointMap.has(readingParams.get('point')))openPoint(readingParams.get('point'));
 else if(chapterMap[readingParams.get('chapter')])openChapter(readingParams.get('chapter'),Number(readingParams.get('page'))||undefined);
 else if(moduleMap[readingParams.get('module')])openLesson(readingParams.get('module'));
+else if(initialView==='materials')openMark(readingParams.get('doc'),readingParams.get('unit'));
 else if(['home','library','quiz','wrong','tools','coverage'].includes(initialView))show(initialView,true,initialView==='quiz'&&readingParams.get('setup')==='1'?{view:'quiz',setup:true}:{view:initialView});
 else show('home',false);
 navigationInitializing=false;

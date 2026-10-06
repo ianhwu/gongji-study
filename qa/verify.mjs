@@ -94,7 +94,7 @@ const elements=new Map();
 const $=id=>{if(!elements.has(id)) elements.set(id,new Element(id)); return elements.get(id)};
 const views=['home','lesson','quiz','wrong','tools','coverage','library'].map($);
 const nav=['home','lesson','quiz','wrong','tools','coverage','library'].map(view=>{const e=new Element();e.dataset.view=view;return e});
-const document={getElementById:$,createElement:tag=>{const e=new Element();e.tag=tag;return e},createTextNode:text=>({textContent:text}),querySelectorAll:selector=>selector==='.view'?views:nav};
+const document={querySelector:()=>null,getElementById:$,createElement:tag=>{const e=new Element();e.tag=tag;return e},createTextNode:text=>({textContent:text}),querySelectorAll:selector=>selector==='.view'?views:nav};
 let loseResponse=false,delayAnswer=false,releaseAnswer;const drafts=new Map();
 const browserEvents=new Map(),browserEntries=[];let browserIndex=0;
 const browserWindow={location:{search:'?module=m14',pathname:'/study.html'},scrollY:0,
@@ -104,7 +104,7 @@ const browserWindow={location:{search:'?module=m14',pathname:'/study.html'},scro
  forward(){if(browserIndex+1<browserEntries.length){browserIndex++;browserEvents.get('popstate')({state:browserEntries[browserIndex].state});}}}};
 const context=vm.createContext({document,window:browserWindow,localStorage:{getItem:k=>drafts.get(k)||null,setItem:(k,v)=>drafts.set(k,v),removeItem:k=>drafts.delete(k)},crypto:webcrypto,URLSearchParams,Date,Math,Map,JSON,console,setTimeout,clearTimeout,
   fetch:async(url,options={})=>{
-    if(url.startsWith('references/')||url.startsWith('editions/'))return Response.json(JSON.parse(fs.readFileSync('public/'+url.split('?')[0],'utf8')));
+    if(url.startsWith('references/')||url.startsWith('editions/')||url.startsWith('materials/'))return Response.json(JSON.parse(fs.readFileSync('public/'+url.split('?')[0],'utf8')));
     if (options.method==='POST') {if(delayAnswer){delayAnswer=false;await new Promise(resolve=>releaseAnswer=resolve);}const response=await api.api.POST(request(JSON.parse(options.body)));if(loseResponse){loseResponse=false;throw new Error('network response lost')}return response;}
     return api.api.GET();
   }});
@@ -383,7 +383,7 @@ const html=fs.readFileSync('public/study.html','utf8');assert(/\.answer-dock\{po
 console.log(JSON.stringify({status:'passed',checks:['previous restores choices order and feedback without duplicate writes','forward returns to unfinished question and keeps multi draft','practice continues after history and resets on new scope','expanded verified licensed images and valid point associations','module image gallery and point jump','lazy image loading and source fallback','answer images shown only after grading','directory branches and scroll survive point/unit navigation','overview disclosure state restored','search does not overwrite collapsed branches','previous/next point navigation','unit selector stays open until explicit dismissal','question revisions preserve historical selections','retired question drafts remain saveable','uncertain references have no dead practice action','anonymous write denial','origin restriction','server answer validation','account isolation','concurrent saves','immediate grading while response is pending','two answers continue during background sync','account-scoped unsynced drafts','durable retry deduplication','idempotent retry after lost response','continuous new questions without reshuffled rounds','no repetition before unseen questions exhausted','account-based restart skips practiced questions','explicit review after bank exhausted','shuffled A-D options keep their own explanations','four explanations and extension on every question','module scope remains stable','multiple payload validation','exact set grading and persisted selection','reversible selection before submit','missed and wrong option explanations','single/multi/mixed continuous scopes','viewport fixed Next action with safe-area clearance','Jilin direct course entry','Jilin official web evidence','Jilin regional continuous practice','Jilin searchable authored notes',...(chapter?['chapter reading position saved','chapter learned saved']:[])],chapters:study.curriculum.length,questions:study.questions.length},null,2));
 
 // Reading edition integrity and navigation, including account and local preferences.
-vm.runInContext("show('library')",context);assert.equal($('bookLibrary').children.length,5);
+vm.runInContext("show('library')",context);assert.equal($('bookLibrary').children.length,6);
 const edition=vm.runInContext('STUDY.readingEdition',context);
 assert.equal(Object.keys(edition).length,study.curriculum.length);
 assert.equal(study.curriculum.filter(c=>['top','bottom'].includes(c.source)&&edition[c.id].authored).length,108);
@@ -592,3 +592,13 @@ $('courseSearch').value='四项基本原则';vm.runInContext('renderCourseDirect
 assert(vm.runInContext('directoryPointButtons.has(currentPoint.id)',context),'search can still reach individual point details');
 $('courseSearch').value='';vm.runInContext('renderCourseDirectory()',context);
 console.log(JSON.stringify({courseModules:'passed',subjects:10,modules:13,topics:91,prerequisiteGroups:38,assessedQuestions:study.questions.length,inlineCourses:true,defaultPointLeaves:0}));
+
+// Source import: every non-video file is accounted for and source figures are usable.
+const mark=study.markLibrary;assert.equal(mark.stats.files,282);assert.equal(mark.stats.xmindFiles,60);assert.equal(mark.stats.imageFiles,76);assert(mark.stats.ocrPages>690);
+const manifest=JSON.parse(fs.readFileSync('public/materials/manifest.json'));assert.equal(manifest.length,282);assert(manifest.every(f=>f.status==='空文件标记，无学习正文'||mark.documents.some(d=>d.id===f.document)));assert(manifest.every(f=>!f.name.endsWith('.mp4')));
+let markUnits=0,markFigures=0,markTrees=0;
+for(const entry of mark.documents){const doc=JSON.parse(fs.readFileSync('public/materials/'+entry.id+'.json'));assert.equal(doc.units.length,entry.unitCount);markUnits+=doc.units.length;for(const u of doc.units){assert(u.blocks.length>0,u.id+' contains actual source learning material');assert(u.start<=u.end);assert(u.topicIds.every(id=>study.topicExpansions.some(t=>t.id===id)));assert(u.blocks.every(b=>b.page>=u.start&&b.page<=u.end),u.id+' has exact PDF page provenance');if(u.trees)markTrees++;}for(const image of doc.images){markFigures++;assert(image.width>0&&image.height>0);const bytes=fs.readFileSync('public/'+image.asset);assert.equal(bytes.toString('ascii',0,4),'RIFF');assert.equal(bytes.toString('ascii',8,12),'WEBP');}if(entry.category==='题本复盘')assert(doc.answerUnitId,'bank answer pages were not mistaken for a contents page');}
+assert.equal(markUnits,mark.stats.units);assert.equal(markFigures,mark.stats.images);assert.equal(markTrees,60);
+const themes=mark.documents.find(d=>d.category==='86专题');assert.equal(themes.unitCount,86);const themeDoc=JSON.parse(fs.readFileSync('public/materials/'+themes.id+'.json'));assert(themeDoc.units.every(u=>u.overview&&u.method.includes(u.overview)&&u.facts.length));assert.equal(themeDoc.units.filter(u=>u.teaching).length,31);assert(themeDoc.units[18].teaching.text.includes('而立30岁'));
+await vm.runInContext(`renderMark({view:'materials',doc:'${themes.id}',unit:'${themeDoc.units[18].id}'})`,context);assert(contentText($('markContent')).includes('而立30岁'),'supplement course has full foundational members');assert(contentText($('markContent')).includes('下一节'));assert(contentText($('markContent')).includes('返回资料目录'));
+console.log(JSON.stringify({markMaterials:'passed',files:manifest.length,documents:mark.documents.length,units:markUnits,figures:markFigures,xmindTrees:markTrees,themes:86,legacyQuizUnaffected:true}));
