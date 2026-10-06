@@ -253,9 +253,15 @@ function selectNextQuestion() {
   const fresh = practicePool.filter((q) => !questionAttempt(q)?.count);
   let candidates;
   if (fresh.length) {
-    const practicedConcepts = new Set(STUDY.questions.filter((q) => questionAttempt(q)?.count).map((q) => q.concept || q.id));
-    const freshConcepts = fresh.filter((q) => !practicedConcepts.has(q.concept || q.id));
-    candidates = freshConcepts.length ? freshConcepts : fresh;
+    // Every independently assessed point counts, including all four options in
+    // authored comparison questions. Prioritize the largest uncovered set.
+    const practicedPoints = new Set(STUDY.questions.filter(q => questionAttempt(q)?.count).flatMap(q => q.pointIds || []));
+    const uncovered = q => (q.pointIds || []).filter(id => !practicedPoints.has(id)).length;
+    const maximum = Math.max(...fresh.map(uncovered));
+    candidates = fresh.filter(q => uncovered(q) === maximum);
+    const practicedConcepts = new Set(STUDY.questions.filter(q => questionAttempt(q)?.count).map(q => q.concept || q.id));
+    const freshConcepts = candidates.filter(q => !practicedConcepts.has(q.concept || q.id));
+    if (freshConcepts.length) candidates = freshConcepts;
   } else {
     const recentCount = Math.min(20, Math.max(1, Math.floor(practicePool.length / 3)));
     const recent = new Set(recentQuestions.slice(-recentCount));
@@ -375,7 +381,7 @@ function renderHome() {
  $('statLessons').textContent=Object.keys(state.learned).filter(id=>state.learned[id]&&(moduleMap[id]||pointMap.has(id)||chapterMap[id])).length;
  $('statCorrect').textContent=STUDY.knowledge.filter(pointCorrect).length;
  $('statWrong').textContent=wrongQuestions().length;
- $('contentCoverage').textContent=`${STUDY.modules.length} 个课程单元 · ${STUDY.knowledge.length} 个已整理考点 · ${STUDY.questions.length} 道题 · ${STUDY.curriculum.length} 个资料章节。${STUDY.coverage.withQuestions} 个考点已配练习；未成题及待核对内容可在“知识点覆盖”查看。`;
+ $('contentCoverage').textContent=`${STUDY.modules.length} 个课程单元 · ${STUDY.knowledge.length} 个已整理考点 · ${STUDY.questions.length} 道题 · ${STUDY.curriculum.length} 个资料章节。${STUDY.coverage.withQuestions} 个考点均已配练习；在“知识点覆盖”查看各考点题目和已练进度。`;
  const sources=$('sourceCoverage');sources.replaceChildren();
  if(STUDY.coverage.jilinPoints){const p=el('p','吉林省情专题');p.append(el('span',`${STUDY.coverage.jilinPoints} 个考点 · ${STUDY.coverage.jilinQuestions} 道原创练习 · ${STUDY.webSources.length} 项官方来源`));sources.append(p);}
  for(const source of STUDY.sources){const p=el('p',source.name);p.append(el('span',`${source.pages} 页可读资料 · ${STUDY.questions.filter(q=>q.source===source.id).length} 道题附出处`));sources.append(p);}
@@ -596,7 +602,7 @@ async function turnChapterPage(delta) {
   }
 }
 
-function showQuizSetup() { $('bankInfo').textContent = `题库共 ${STUDY.questions.length} 道题，其中 ${STUDY.coverage.multipleQuestions||0} 道多选题。题目参考五份资料，吉林专题另依据官方网页原创编题；${STUDY.coverage.withQuestions} 个考点已配题；未成题内容仍可从课程和资料学习。题目为本站自编练习。按账号记录优先未做题与新考点，支持单选与多选，可选择只刷多选；每题都有四项解析和考点拓展；可用上一题回看本次练习，回看不会重复记分；全部做过后会明确进入复习，可以持续练习。可以按单元或考点缩小练习范围。`; $('quizSetup').classList.remove('hidden'); $('quizPlay').classList.add('hidden');  }
+function showQuizSetup() { $('bankInfo').textContent = `题库共 ${STUDY.questions.length} 道题，其中 ${STUDY.coverage.multipleQuestions||0} 道多选题。题目参考五份资料，吉林专题另依据官方网页原创编题；${STUDY.coverage.withQuestions} 个已整理考点均已配题，可在“知识点覆盖”逐项核对。题目为本站自编练习。按账号记录优先未做题与新考点，支持单选与多选，可选择只刷多选；每题都有四项解析和考点拓展；可用上一题回看本次练习，回看不会重复记分；全部做过后会明确进入复习，可以持续练习。可以按单元或考点缩小练习范围。`; $('quizSetup').classList.remove('hidden'); $('quizPlay').classList.add('hidden');  }
 function startQuiz(items, mode = 'endless') {
   if (!requireAccount()) return;
   if(mode!=='specific')items=typeFiltered(items);
@@ -616,7 +622,10 @@ function renderQuestion() {
   const remaining = practicePool.filter((item) => !questionAttempt(item)?.count).length;
   const currentCount = visit.count;
   $('quizCounter').textContent = `连续第 ${at + 1} 题${at<queue.length-1 ? '（回看）' : ''} · ${currentCount ? '复习题（已做 ' + currentCount + ' 次）' : '未做过的新题'} · 本次答对 ${sessionCorrect}/${sessionAnswered} · ${moduleMap[q.module].title}`;
-  $('practiceStatus').textContent = (remaining ? `当前范围还剩 ${remaining} 道未做题，优先新考点；账号记录会在刷新或换设备后继续使用。` : `当前范围 ${practicePool.length} 道题均已做过，继续复习错题、到期题和较少练习的题。可切换到更大练习范围。`);
+  const scopeIds=new Set(practicePool.flatMap(item=>item.pointIds||[]));
+  const practicedIds=new Set(STUDY.questions.filter(item=>questionAttempt(item)?.count).flatMap(item=>item.pointIds||[]));
+  const scopeDone=[...scopeIds].filter(id=>practicedIds.has(id)).length;
+  $('practiceStatus').textContent = `当前范围已练 ${scopeDone}/${scopeIds.size} 个考点，尚未练 ${scopeIds.size-scopeDone} 个。` + (remaining ? `还剩 ${remaining} 道未做题，优先补齐未练考点；账号记录支持跨设备继续。` : `当前 ${practicePool.length} 道题均已做过，继续复习错题、到期题和较少练习的题。`);
   $('questionType').textContent=q.answers?'多选题 · 选出所有正确项':'单选题 · 选一个正确项';
   $('answerRule').textContent=q.answers?'本练习按全部选对判分：漏选、错选均记为错题。选好后点击提交答案。':'点击选项立即判分。';
   $('quizBar').style.width = ((practicePool.length - remaining) / practicePool.length * 100) + '%'; $('question').textContent = q.prompt;
@@ -694,7 +703,8 @@ function renderAnswer(originalIndex){
   const topic=topicMap.get(STUDY.questionTopics?.[q.id]);if(topic)feedback.append(topicExpansion(topic,{excludeVisualIds:pictures.map(v=>v.id)}));
   for(const ref of q.extraRefs||[]){if(ref.source===q.source&&ref.page===q.page)continue;const link=el('a',`其他依据：${referenceLabel(ref.source,ref.page)}`);link.href=sourceLink(ref.source,ref.page);link.target='_blank';feedback.append(el('p'),link);}
   if(q.authority){const official=el('a','核对现行权威依据 ↗');official.href=q.authority;official.target='_blank';official.rel='noopener';feedback.append(el('p'),official);}
-  const point=q.pointIds?.[0];if(point)feedback.append(el('p'),action('回到本题知识点讲解',()=>openPoint(point))); $('nextQuestion').classList.remove('hidden');
+  const point=q.pointIds?.[0];if(point)feedback.append(el('p'),action('回到本题知识点讲解',()=>openPoint(point)));
+  if(q.optionAssessments){const related=el('div',undefined,'actions');related.append(el('span','逐项学习本题考点：','muted small'));for(const id of q.pointIds){const p=pointMap.get(id);if(p)related.append(action(p.title,()=>openPoint(id)));}feedback.append(related);} $('nextQuestion').classList.remove('hidden');
 }
 function nextQuestion() {
  if(!answered)return;

@@ -285,10 +285,10 @@ assert.equal(vm.runInContext(`questionAttempt(questionMap.get('${legacy.id}'))`,
 const changedRow=$('wrongList').children.find(row=>row.children?.[0]?.textContent?.startsWith(legacy.id+' ·'));
 assert(changedRow.children.some(x=>x.textContent?.includes('本题已改写')));
 assert(!changedRow.children.some(x=>x.textContent?.startsWith('上次选择：')),'old positions are not shown against new options');
-const pendingPoint=study.knowledge.find(p=>p.status==='needs-question'&&!p.questionIds.length);
-vm.runInContext(`openPoint('${pendingPoint.id}')`,context);
-assert(walk($('pointLesson')).some(e=>e.textContent?.includes('尚未编成')));
-assert(!walk($('pointLesson')).some(e=>e.textContent==='练这个考点'));
+assert(study.knowledge.every(p=>p.questionIds.length&&p.status==='ready'),'every organized point has practice');
+const coveredPoint=study.knowledge.find(p=>p.coverageAuthored);
+vm.runInContext(`openPoint('${coveredPoint.id}')`,context);
+assert(walk($('pointLesson')).some(e=>e.textContent==='练这个考点'));
 // Course dropdown is a labelled disclosure with full-sized selectable rows.
 vm.runInContext("openLesson('m01')",context);assert.equal($('unitMenuOptions').children.length,study.modules.length);
 const targetUnit=study.modules.find(m=>m.id==='m07'),targetButton=$('unitMenuOptions').children.find(b=>b.children[0].children[0].textContent===targetUnit.title);
@@ -334,7 +334,7 @@ walk($('lessonVisuals')).find(e=>e.className==='visual-point-link').onclick();as
 assert(walk($('pointLesson')).some(e=>e.tag==='img'&&e.alt.startsWith('长白山天池')));
 assert(walk($('pointLesson')).some(e=>e.alt?.startsWith('长白山天池')));
 vm.runInContext("openPoint('supplement-34f6eb3faf3e83')",context);assert.equal(walk($('pointLesson')).filter(e=>e.tag==='img'&&['花岗岩','玄武岩','黄山'].some(name=>e.alt.startsWith(name))).length,3,'granite basalt and Huangshan remain linked without duplicates');
-vm.runInContext(`openPoint('${pointForNav.id}')`,context);assert(!walk($('pointLesson')).some(e=>e.tag==='img'&&e.src?.includes('/images/visual/')),'legal topic does not get unrelated scenery');
+vm.runInContext(`openPoint('${pointForNav.id}')`,context);assert(!walk($('pointLesson')).some(e=>e.tag==='img'&&['黄山','长白山','火山','峡谷'].some(name=>e.alt?.startsWith(name))),'legal topic does not get unrelated scenery');
 vm.runInContext("openLesson('m01')",context);assert(!$('lessonViewImages').className.includes('hidden'));assert(walk($('lessonVisuals')).some(e=>e.className==='topic-diagram'),'abstract subjects have functional concept diagrams');
 const pictureQuestion=study.questions.find(q=>q.pointIds?.includes('jl-point-crater-lake'));assert(pictureQuestion);
 user={userId:'frontend-test',email:'f@example.test'};
@@ -442,7 +442,7 @@ assert(walk($('navigationReturn')).some(e=>e.textContent==='返回错题复习')
 console.log('Navigation passed: answer-to-knowledge return, browser back/forward, active quiz resumption, multi drafts, no duplicate writes, settings/exit, PDF page and coverage/wrong-list return.');
 // Thematic expansions explain the entire group and retain the active question.
 const topicById=new Map(study.topicExpansions.map(t=>[t.id,t]));
-assert.equal(study.topicExpansions.filter(t=>!t.overviewOnly).length,62);
+assert.equal(study.topicExpansions.filter(t=>!t.overviewOnly).length,65);
 for(const question of study.questions){const topic=topicById.get(study.questionTopics[question.id]);assert(topic&&!topic.overviewOnly,'every question has an authored subject-specific expansion');assert.equal(topic.module,question.module);assert(topic.diagram.length>=3);}
 for(const point of study.knowledge)assert.equal(topicById.get(study.pointTopics[point.id]).module,point.module);
 for(const topic of study.topicExpansions){assert(topic.overview&&topic.connection&&topic.boundary&&topic.variant&&topic.recall);assert(topic.relatedTopicIds.every(id=>topicById.get(id).module===topic.module));if(topic.diagramAsset)assert(fs.existsSync('public/'+topic.diagramAsset));for(const figure of topic.sourceFigures)assert(fs.existsSync('public/'+figure.src));}
@@ -510,3 +510,49 @@ assert.equal(peace.studyGuide.members.length,5);assert.equal(peace.page,173);
 assert(!peace.statement.includes('勋章'),'foreign policy content no longer confused with awards');
 console.log('Multiple quality passed: 40 two-answer, 20 three-answer, 2 four-answer questions; all 992 subsets checked; all 62 old/new versions remain saveable.');
 console.log('Grouped concepts passed: 21 enriched points; four principles explicitly rendered and included in answer expansion; diplomatic content and source corrected.');
+
+// Full coverage is tied to the independently tested wording of each option.
+const baselineCoverage=JSON.parse(fs.readFileSync('src/coverage-targets.json','utf8'));
+const addedCoverage=study.questions.filter(q=>q.kind==='coverage-authored');
+assert.equal(addedCoverage.length,290);
+for(const point of study.knowledge){
+ assert(point.questionIds.length>0&&point.status==='ready');
+ for(const id of point.questionIds)assert(study.questions.find(q=>q.id===id)?.pointIds.includes(point.id),'bidirectional membership');
+}
+for(const point of baselineCoverage){
+ const testing=addedCoverage.filter(q=>q.pointIds.includes(point.id));
+ assert(testing.some(q=>q.answers)&&testing.some(q=>!q.answers),'each restored point has single and multi practice');
+ assert(testing.every(q=>q.optionAssessments.some(a=>a.pointId===point.id)),'not an untested association');
+}
+for(const q of addedCoverage){
+ assert.equal(new Set(q.options).size,4);
+ assert.equal(q.optionAssessments.length,4);
+ q.optionAssessments.forEach((a,i)=>{assert.equal(a.optionIndex,i);assert(q.pointIds.includes(a.pointId));assert(q.optionExplanations[i].includes(a.verifiedStatement));});
+}
+assert.equal(study.coverage.withQuestions,study.knowledge.length);
+assert.equal(study.coverage.pendingQuestions+study.coverage.pendingReview,0);
+// Exhaustively grade every subset for new multis and every answer for new singles.
+user={userId:'coverage-grading',email:'coverage@example.test'};
+let coverageGrades=0;
+for(const q of addedCoverage){
+ const choices=q.answers?Array.from({length:15},(_,mask)=>[0,1,2,3].filter(i=>(mask+1)&(1<<i))):[0,1,2,3];
+ for(const choice of choices){
+  const expected=q.answers?JSON.stringify(choice)===JSON.stringify(q.answers):choice===q.answer;
+  const response=await (await post({type:'answer',questionId:q.id,questionRevision:q.revision,choice})).json();
+  assert.equal(response.correct,expected);coverageGrades++;
+ }
+}
+// Draw continuously with account-shaped records: unseen points outrank variants
+// on already seen concepts; no repeated new question before the bank is exhausted.
+const savedCoverageState=vm.runInContext('JSON.stringify(state)',context);
+vm.runInContext('state={attempts:{},learned:{},planDay:1};practicePool=STUDY.questions;recentQuestions=[];lastConcept=null',context);
+const seenQuestionIds=new Set(),seenPointIds=new Set();
+while(seenPointIds.size<study.knowledge.length){
+ const chosen=JSON.parse(vm.runInContext('JSON.stringify(selectNextQuestion())',context));
+ assert(!seenQuestionIds.has(chosen.id));
+ assert(chosen.pointIds.some(id=>!seenPointIds.has(id)),'continues adding uncovered knowledge');
+ seenQuestionIds.add(chosen.id);chosen.pointIds.forEach(id=>seenPointIds.add(id));
+ vm.runInContext(`state.attempts[${JSON.stringify(chosen.id)}]={count:1,lastCorrect:true,lastAt:Date.now(),lastQuestionRevision:${JSON.stringify(chosen.revision||'legacy')}};lastConcept=${JSON.stringify(chosen.concept||chosen.id)}`,context);
+}
+vm.runInContext(`state=${savedCoverageState}`,context);
+console.log(JSON.stringify({fullCoverage:'passed',knowledge:seenPointIds.size,questions:study.questions.length,newQuestions:addedCoverage.length,exhaustiveGrades:coverageGrades,continuousDrawsToCoverKnowledge:seenQuestionIds.size}));

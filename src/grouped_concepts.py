@@ -41,7 +41,9 @@ def apply_grouped(study):
             p['correction']='已纠正原整理中将勋章内容与外交原则错配的问题，按资料第173页及外交部资料核对。'
         if p['title']=='全球四大导航系统':
             p['statement']='全球四大卫星导航系统是中国北斗、美国GPS、俄罗斯格洛纳斯、欧洲伽利略。'
-            p['status']='needs-question';p['reviewReason']='具体内容已按卫星导航系统主管部门资料核对，尚未另编完整练习。'
+            
+            if not p.get('questionIds'):
+                p['status']='needs-question';p['reviewReason']='具体内容已按卫星导航系统主管部门资料核对，尚未另编完整练习。'
         updated.append(p['id'])
     points={p['id']:p for p in study['knowledge']}
     for q in study['questions']:
