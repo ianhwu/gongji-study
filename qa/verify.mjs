@@ -321,14 +321,14 @@ for(const image of visuals){
  const bytes=fs.readFileSync('public'+image.asset);assert(bytes.length>1000);assert((bytes[0]===255&&bytes[1]===216)||bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'valid JPEG or PNG asset');
 }
 vm.runInContext("openLesson('m14')",context);
-assert.equal($('lessonViewImages').textContent,`图片对照 · ${visuals.filter(i=>i.moduleIds.includes('m14')).length} 张`);assert(!$('lessonVisuals').className.includes('hidden'));
+assert($('lessonViewImages').textContent.includes('图解与图片 · 3 个专题'));assert(!$('lessonVisuals').className.includes('hidden'));
 const moduleImage=walk($('lessonVisuals')).find(e=>e.tag==='img');assert.equal(moduleImage.loading,'lazy');assert.equal(moduleImage.decoding,'async');
 walk($('lessonVisuals')).find(e=>e.className==='visual-point-link').onclick();assert.equal(vm.runInContext('currentPoint.id',context),'jl-point-crater-lake');
-assert.equal(walk($('pointLesson')).filter(e=>e.tag==='img').length,1);
+assert(walk($('pointLesson')).some(e=>e.tag==='img'&&e.alt.startsWith('长白山天池')));
 assert(walk($('pointLesson')).some(e=>e.alt?.startsWith('长白山天池')));
-vm.runInContext("openPoint('supplement-34f6eb3faf3e83')",context);assert.equal(walk($('pointLesson')).filter(e=>e.tag==='img').length,3,'granite basalt and Huangshan associated with igneous rock');
-vm.runInContext(`openPoint('${pointForNav.id}')`,context);assert.equal(walk($('pointLesson')).filter(e=>e.tag==='img').length,0,'unrelated legal point has no scenery');
-vm.runInContext("openLesson('m01')",context);assert($('lessonViewImages').className.includes('hidden'));
+vm.runInContext("openPoint('supplement-34f6eb3faf3e83')",context);assert.equal(walk($('pointLesson')).filter(e=>e.tag==='img'&&['花岗岩','玄武岩','黄山'].some(name=>e.alt.startsWith(name))).length,3,'granite basalt and Huangshan remain linked without duplicates');
+vm.runInContext(`openPoint('${pointForNav.id}')`,context);assert(!walk($('pointLesson')).some(e=>e.tag==='img'&&e.src?.includes('/images/visual/')),'legal topic does not get unrelated scenery');
+vm.runInContext("openLesson('m01')",context);assert(!$('lessonViewImages').className.includes('hidden'));assert(walk($('lessonVisuals')).some(e=>e.className==='topic-diagram'),'abstract subjects have functional concept diagrams');
 const pictureQuestion=study.questions.find(q=>q.pointIds?.includes('jl-point-crater-lake'));assert(pictureQuestion);
 user={userId:'frontend-test',email:'f@example.test'};
 vm.runInContext(`startQuiz([questionMap.get('${pictureQuestion.id}')])`,context);assert.equal(walk($('feedback')).filter(e=>e.tag==='img').length,0,'question has no visual hint before answer');
@@ -433,3 +433,21 @@ vm.runInContext(`openPoint('${linkedSingle.pointIds[0]}')`,context);walk($('less
 vm.runInContext("show('wrong')",context);walk($('wrongList')).find(e=>e.textContent==='重做此题').onclick();
 assert(walk($('navigationReturn')).some(e=>e.textContent==='返回错题复习'));walk($('navigationReturn')).find(e=>e.textContent==='返回错题复习').onclick();await settleNavigation();assert(views.find(e=>e.id==='wrong').className.includes('active'));
 console.log('Navigation passed: answer-to-knowledge return, browser back/forward, active quiz resumption, multi drafts, no duplicate writes, settings/exit, PDF page and coverage/wrong-list return.');
+// Thematic expansions explain the entire group and retain the active question.
+const topicById=new Map(study.topicExpansions.map(t=>[t.id,t]));
+assert.equal(study.topicExpansions.filter(t=>!t.overviewOnly).length,62);
+for(const question of study.questions){const topic=topicById.get(study.questionTopics[question.id]);assert(topic&&!topic.overviewOnly,'every question has an authored subject-specific expansion');assert.equal(topic.module,question.module);assert(topic.diagram.length>=3);}
+for(const point of study.knowledge)assert.equal(topicById.get(study.pointTopics[point.id]).module,point.module);
+for(const topic of study.topicExpansions){assert(topic.overview&&topic.connection&&topic.boundary&&topic.variant&&topic.recall);assert(topic.relatedTopicIds.every(id=>topicById.get(id).module===topic.module));if(topic.diagramAsset)assert(fs.existsSync('public/'+topic.diagramAsset));for(const figure of topic.sourceFigures)assert(fs.existsSync('public/'+figure.src));}
+assert.equal(study.questionTopics.q001,'topic-law-functions');assert.equal(study.questionTopics['k-point-e9e46719b75d3f'],'topic-culture-values');
+vm.runInContext("startQuiz([questionMap.get('q001')],'specific')",context);
+assert.equal(walk($('feedback')).filter(e=>e.dataset?.topicId).length,0,'no answer diagram reveals the solution beforehand');
+answerQuestion(study.questions.find(q=>q.id==='q001'));await drain();
+const answerBeforeTopic=practiceSnapshot(),topicAttempt=JSON.parse(rows.get('frontend-test').state_json).attempts.q001.count;
+const expansion=walk($('feedback')).find(e=>e.dataset?.topicId==='topic-law-functions');assert(expansion);
+const explanationText=walk(expansion).map(e=>e.textContent||'').join(' ');for(const term of ['指引','评价','预测','教育','强制','易混点与适用边界','换个条件怎么考'])assert(explanationText.includes(term));
+walk(expansion).find(e=>e.textContent==='打开完整专题').onclick();assert.equal(vm.runInContext('currentTopic.id',context),'topic-law-functions');assert(browserEntries[browserIndex].url.includes('topic=topic-law-functions'));
+walk($('lessonReturn')).find(e=>e.textContent==='返回刷题').onclick();await settleNavigation();assert.equal(practiceSnapshot(),answerBeforeTopic);
+browserWindow.history.forward();await settleNavigation();assert.equal(vm.runInContext('currentTopic.id',context),'topic-law-functions','browser forward restores full topic');
+vm.runInContext("openTopic('topic-crime-stages')",context);walk($('lessonReturn')).find(e=>e.textContent==='返回当前题').onclick();assert.equal(practiceSnapshot(),answerBeforeTopic);await drain();assert.equal(JSON.parse(rows.get('frontend-test').state_json).attempts.q001.count,topicAttempt,'reading expanded knowledge does not submit another answer');
+console.log('Topic expansions passed: 62 authored systems, all 721 questions and 1152 points linked, functional diagram assets, safe factual image links, full-topic return and history preserve attempts.');

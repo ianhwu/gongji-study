@@ -37,6 +37,9 @@ pdf_page_count=len(pages['pages'])
 pages['sources'].append(dict(id='jilin-notes',name='吉林省情讲解',pages=len(study['regionalPages']),method='原创整理 · 官方核对',edition='2026-10-05核对',uri='study.html?module=m14',kind='study-notes'))
 pages['pages']+=study['regionalPages']
 study["visualReferences"] = json.loads((SRC / "visual-references.json").read_text(encoding="utf-8"))
+from topic_expansions import compile_topics, write_diagrams
+study["topicExpansions"], study["pointTopics"], study["questionTopics"] = compile_topics(study)
+write_diagrams(study["topicExpansions"], DIST)
 study["contentVersion"] = hashlib.sha256((js_literal(pages)+js_literal(study["readingEdition"])+js_literal(editions)).encode()).hexdigest()[:12]
 (DIST / "references").mkdir(exist_ok=True)
 for source in pages["sources"]:
