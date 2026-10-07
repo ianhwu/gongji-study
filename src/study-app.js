@@ -1,9 +1,10 @@
 const $ = (id) => document.getElementById(id);
 const moduleMap = Object.fromEntries(STUDY.modules.map((module) => [module.id, module]));
-const sourceMap = Object.fromEntries([...STUDY.sources,...(STUDY.webSources||[])].map((source) => [source.id, source]));
+const sourceMap = Object.fromEntries([...STUDY.sources,...(STUDY.webSources||[]),...(STUDY.markLibrary?.documents||[]).map(d=>({...d,name:'马克资料 · '+d.title,kind:'mark'}))].map((source) => [source.id, source]));
 const sourcePageMap = new Map();
 const loadedSources = new Map();
 async function loadSource(id) {
+  if(sourceMap[id]?.kind==='mark')return loadMarkDoc(id).then(doc=>{const pages=new Map();for(const u of doc.units)for(const b of u.blocks){if(!pages.has(b.page))pages.set(b.page,new Set());pages.get(b.page).add(b.text);}for(const [page,texts] of pages)sourcePageMap.set(id+':'+page,[...texts].join('\n'));});
   if (!loadedSources.has(id)) loadedSources.set(id, fetch('references/'+id+'.json?v='+STUDY.contentVersion).then(r=>{if(!r.ok)throw new Error();return r.json();}).then(rows=>{for(const row of rows)sourcePageMap.set(id+':'+row.p,row.t);}).catch(e=>{loadedSources.delete(id);throw e;}));
   return loadedSources.get(id);
 }
@@ -245,7 +246,7 @@ async function flushAnswers() {
   if (answerOutbox.length && !syncError) { clearTimeout(syncTimer); syncTimer = setTimeout(() => void flushAnswers(),250); }
 }
 
-function sourceLink(source, page) { return sourceMap[source].url || ('source.html?source=' + encodeURIComponent(source) + '&page=' + page); }
+function sourceLink(source, page) { const s=sourceMap[source];if(s.kind==='mark'){const unit=s.units.find(u=>page>=u.start&&page<=u.end);return 'study.html?view=materials&doc='+encodeURIComponent(source)+(unit?'&unit='+encodeURIComponent(unit.id):'');}return s.url || ('source.html?source=' + encodeURIComponent(source) + '&page=' + page); }
 function referenceLabel(source,page) {const s=sourceMap[source];return s.url?`${s.name} · 核对 ${s.checkedAt}`:`${s.name} · PDF 第 ${page} 页`; }
 function countCorrect(module) { return STUDY.questions.filter((q) => (!module || q.module === module) && questionAttempt(q)?.lastCorrect).length; }
 function wrongQuestions() { return STUDY.questions.filter((q) => state.attempts[q.id] && !state.attempts[q.id].lastCorrect); }
@@ -393,7 +394,7 @@ function renderHome() {
  $('contentCoverage').textContent=`${STUDY.modules.length} 个课程单元 · ${STUDY.knowledge.length} 个已整理考点 · ${STUDY.questions.length} 道题 · ${STUDY.curriculum.length} 个资料章节。${STUDY.coverage.withQuestions} 个考点均已配练习；在“知识点覆盖”查看各考点题目和已练进度。`;
  const sources=$('sourceCoverage');sources.replaceChildren();
  if(STUDY.coverage.jilinPoints){const p=el('p','吉林省情专题');p.append(el('span',`${STUDY.coverage.jilinPoints} 个考点 · ${STUDY.coverage.jilinQuestions} 道原创练习 · ${STUDY.webSources.length} 项官方来源`));sources.append(p);}
- if(markLibrary.documents.length){const p=el('p','马克资料合集');p.append(el('span',`${markLibrary.stats.files} 份非视频文件 · ${markLibrary.stats.documents} 组学习资料 · ${markLibrary.stats.units} 节`),action('打开学习馆',()=>openMark(),'point-link'));sources.append(p);}
+ if(markLibrary.documents.length){const p=el('p','马克资料合集');p.append(el('span',`${markLibrary.stats.files} 份非视频文件 · ${markLibrary.stats.documents} 组学习资料 · ${markLibrary.stats.units} 节`),action('打开学习馆',()=>openMark(),'point-link'),action('马克资料专项 · '+STUDY.markQuiz.questions+' 题',()=>startMarkQuiz(),'point-link'));sources.append(p);}
  const interviewEntry=el('p','结构化面试');interviewEntry.append(el('span','8 个框架模块 · '+interviewLibrary.questions.length+' 道真题 · 提纲与复盘'),action('进入面试学习',()=>openInterview(),'point-link'));sources.append(interviewEntry);
  for(const source of STUDY.sources){const p=el('p',source.name);p.append(el('span',`${source.pages} 页可读资料 · ${STUDY.questions.filter(q=>q.source===source.id).length} 道题附出处`));sources.append(p);}
  const grid=$('moduleGrid');grid.className='subject-grid';grid.replaceChildren();
@@ -624,7 +625,8 @@ async function turnChapterPage(delta) {
   }
 }
 
-function showQuizSetup() { $('bankInfo').textContent = `题库共 ${STUDY.questions.length} 道题，其中 ${STUDY.coverage.multipleQuestions||0} 道多选题。题目参考五份资料，吉林专题另依据官方网页原创编题；${STUDY.coverage.withQuestions} 个已整理考点均已配题，可在“知识点覆盖”逐项核对。题目为本站自编练习。按账号记录优先未做题与新考点，支持单选与多选，可选择只刷多选；每题都有四项解析和考点拓展；可用上一题回看本次练习，回看不会重复记分；全部做过后会明确进入复习，可以持续练习。可以按单元或考点缩小练习范围。`; $('quizSetup').classList.remove('hidden'); $('quizPlay').classList.add('hidden');  }
+function startMarkQuiz(doc=null,unit=null){const bank=STUDY.questions.filter(q=>q.kind==='mark-authored'&&(!doc||q.markRefs.some(r=>r.doc===doc&&(!unit||r.unit===unit))));if(!bank.length){notice('本节尚未有经过核对的练习题。');return;}startQuiz(bank,'endless');}
+function showQuizSetup() { $('bankInfo').textContent = `题库 ${STUDY.questions.length} 题 · 多选 ${STUDY.coverage.multipleQuestions||0} 题 · ${STUDY.coverage.withQuestions} 个已整理考点。马克新增 ${STUDY.markQuiz.questions} 题，涉及86个专题和20组基础知识，已纳入随机练习，也可单独练“马克资料专项”。按账号优先未做题和未练考点；全部做过后持续复习。每题附四项解析、相关专题与资料出处。`; $('quizSetup').classList.remove('hidden'); $('quizPlay').classList.add('hidden');  }
 function startQuiz(items, mode = 'endless') {
   if (!requireAccount()) return;
   if(mode!=='specific')items=typeFiltered(items);
@@ -721,11 +723,13 @@ function renderAnswer(originalIndex){
   if(groupedPoint?.studyGuide)feedback.append(conceptGuide(groupedPoint.studyGuide));
   else feedback.append(extensionHeading,extension);
   feedback.append(source);
+  if(q.markRefs?.length){const refs=el('div',undefined,'actions');for(const r of q.markRefs){const u=markDocs.get(r.doc)?.units.find(u=>u.id===r.unit);refs.append(action('阅读：'+(u?.title||'对应马克资料'),()=>openMark(r.doc,r.unit),'btn secondary'));}feedback.append(refs,el('p','本题是依据资料整理的自编练习，来源按钮打开对应阅读单元；返回当前题可继续作答。','muted small'));}
   const pictures=pointPictures(q.pointIds||[]);if(pictures.length)feedback.append(el('h3','看图巩固本题考点'),visualGallery(pictures));
   const topicIds=STUDY.questionTopicIds?.[q.id]||[STUDY.questionTopics?.[q.id]];
   for(const [index,tid] of topicIds.entries()){const topic=topicMap.get(tid);if(!topic)continue;const expansion=topicExpansion(topic,{excludeVisualIds:pictures.map(v=>v.id)});if(index===0)feedback.append(expansion);else{const part=el('details',undefined,'reading-detail assessed-topic');part.append(el('summary','本题还考查：'+topic.title),expansion);feedback.append(part);}}
   for(const ref of q.extraRefs||[]){if(ref.source===q.source&&ref.page===q.page)continue;const link=el('a',`其他依据：${referenceLabel(ref.source,ref.page)}`);link.href=sourceLink(ref.source,ref.page);link.target='_blank';feedback.append(el('p'),link);}
   if(q.authority){const official=el('a','核对现行权威依据 ↗');official.href=q.authority;official.target='_blank';official.rel='noopener';feedback.append(el('p'),official);}
+  for(const url of q.additionalAuthorities||[]){const link=el('a','核对本专题其他权威依据 ↗');link.href=url;link.target='_blank';link.rel='noopener';feedback.append(el('p'),link);}
   const point=q.pointIds?.[0];if(point)feedback.append(el('p'),action('回到本题知识点讲解',()=>openPoint(point)));
   if(q.optionAssessments){const related=el('div',undefined,'actions');related.append(el('span','逐项学习本题考点：','muted small'));for(const id of q.pointIds){const p=pointMap.get(id);if(p)related.append(action(p.title,()=>openPoint(id)));}feedback.append(related);} $('nextQuestion').classList.remove('hidden');
 }
@@ -807,6 +811,7 @@ window.addEventListener('pointerdown',event=>{if(!$('unitMenu').contains(event.t
 $('markLearned').onclick = async () => { if (!requireAccount()) return; try { await persist({ type: 'learn', moduleId: currentModule }); $('markLearned').textContent = '已标记学过'; } catch (error) { notice('学习记录未保存：' + error.message); } };
 $('lessonQuiz').onclick = () => startQuiz(STUDY.questions.filter((q) => q.module === currentModule), 'endless');
 $('startEndless').onclick = startEndless;
+$('startMark').onclick=()=>startMarkQuiz();
 $('startMultiple').onclick=()=>{$('quizType').value='multiple';startEndless();};
 $('startModule').onclick = () => startQuiz(STUDY.questions.filter((q) => q.module === $('quizModule').value), 'endless');
 $('startDue').onclick = () => startQuiz(shuffle(dueQuestions()));

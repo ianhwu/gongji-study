@@ -205,7 +205,7 @@ assert(!fs.readFileSync('public/study.html','utf8').includes('本轮'));
 const jilinPoints=study.knowledge.filter(p=>p.module==='m14'),jilinQuestions=study.questions.filter(q=>q.module==='m14');
 assert.equal(jilinPoints.length,63);assert.equal(jilinQuestions.length,91);
 assert.equal(new Set(jilinPoints.map(p=>p.group)).size,9);
-assert.equal(study.knowledge.filter(p=>p.module!=='m14').length,1089,'base knowledge IDs preserved');
+assert.equal(study.knowledge.filter(p=>p.module!=='m14'&&!p.markAuthored).length,1089,'base knowledge IDs preserved');
 assert(study.questions.filter(q=>q.module!=='m14'&&!q.answers).length>500,'substantial usable base bank');
 assert(study.questions.every(q=>!/(概念回忆|对应哪个考点|该考点)/.test(q.prompt)));
 assert.equal(study.coverage.withQuestions,study.knowledge.filter(p=>p.questionIds.length).length);
@@ -442,7 +442,7 @@ assert(walk($('navigationReturn')).some(e=>e.textContent==='返回错题复习')
 console.log('Navigation passed: answer-to-knowledge return, browser back/forward, active quiz resumption, multi drafts, no duplicate writes, settings/exit, PDF page and coverage/wrong-list return.');
 // Thematic expansions explain the entire group and retain the active question.
 const topicById=new Map(study.topicExpansions.map(t=>[t.id,t]));
-assert.equal(study.topicExpansions.filter(t=>!t.overviewOnly).length,91);
+assert.equal(study.topicExpansions.filter(t=>!t.overviewOnly&&!t.markRef).length,91);
 for(const question of study.questions){const topic=topicById.get(study.questionTopics[question.id]);assert(topic&&!topic.overviewOnly,'every question has an authored subject-specific expansion');assert.equal(topic.module,question.module);assert(topic.diagram.length>=3);}
 for(const point of study.knowledge)assert.equal(topicById.get(study.pointTopics[point.id]).module,point.module);
 for(const topic of study.topicExpansions){assert(topic.overview&&topic.connection&&topic.boundary&&topic.variant&&topic.recall);assert(topic.relatedTopicIds.every(id=>topicById.get(id).module===topic.module));if(topic.diagramAsset)assert(fs.existsSync('public/'+topic.diagramAsset));for(const figure of topic.sourceFigures)assert(fs.existsSync('public/'+figure.src));}
@@ -460,7 +460,7 @@ vm.runInContext("openTopic('topic-crime-stages')",context);walk($('lessonReturn'
 console.log('Topic expansions passed: 91 authored systems, all 1011 questions and 1152 points linked, functional diagram assets, safe factual image links, full-topic return and history preserve attempts.');
 
 // Every selection subset must be graded against the requested multiple-question version.
-const refreshedMulti=rawStudy.questions.filter(q=>q.type==='multiple');
+const refreshedMulti=rawStudy.questions.filter(q=>q.type==='multiple'&&q.kind!=='mark-authored');
 const distribution={2:0,3:0,4:0};
 assert.equal(refreshedMulti.length,62);
 for(const item of refreshedMulti){
@@ -559,7 +559,7 @@ console.log(JSON.stringify({fullCoverage:'passed',knowledge:seenPointIds.size,qu
 
 // Curated prerequisites and course associations are shared across every entry point.
 const curatedTopics=JSON.parse(fs.readFileSync('src/course-topic-map.json','utf8'));
-assert.equal(Object.keys(curatedTopics).length,1152);
+assert.equal(Object.keys(curatedTopics).filter(id=>!id.startsWith('mark-point-')).length,1152);
 for(const q of study.questions){
  const expected=[...new Set(q.pointIds.map(id=>curatedTopics[id]))];
  assert.deepEqual(Array.from(study.questionTopicIds[q.id]),expected,'expansion follows assessed knowledge, including multi-topic questions');
@@ -575,7 +575,7 @@ assert.equal(study.pointTopics[namedPoint('生产关系的三个要素').id],'to
 assert.equal(study.foundationCount,38);
 vm.runInContext("openLesson('m06')",context);
 assert.equal(vm.runInContext('directoryPointButtons.size',context),0,'default directory consists of module and topic entries');
-assert.equal(vm.runInContext('directoryGroups.size',context),91,'each thematic lesson appears once');
+assert.equal(vm.runInContext('directoryGroups.size',context),197,'each thematic lesson appears once');
 for(const member of principles.studyGuide.members)assert(contentText($('lessonPoints')).includes(member.name));
 vm.runInContext("openTopic('topic-theory-development')",context);
 for(const member of principles.studyGuide.members)assert(contentText($('pointLesson')).includes(member.name));
@@ -591,7 +591,7 @@ for(const member of principles.studyGuide.members)assert(contentText($('feedback
 $('courseSearch').value='四项基本原则';vm.runInContext('renderCourseDirectory()',context);
 assert(vm.runInContext('directoryPointButtons.has(currentPoint.id)',context),'search can still reach individual point details');
 $('courseSearch').value='';vm.runInContext('renderCourseDirectory()',context);
-console.log(JSON.stringify({courseModules:'passed',subjects:10,modules:13,topics:91,prerequisiteGroups:38,assessedQuestions:study.questions.length,inlineCourses:true,defaultPointLeaves:0}));
+console.log(JSON.stringify({courseModules:'passed',subjects:10,modules:13,topics:197,prerequisiteGroups:38,assessedQuestions:study.questions.length,inlineCourses:true,defaultPointLeaves:0}));
 
 // Source import: every non-video file is accounted for and source figures are usable.
 const mark=study.markLibrary;assert.equal(mark.stats.files,282);assert.equal(mark.stats.xmindFiles,60);assert.equal(mark.stats.imageFiles,76);assert(mark.stats.ocrPages>690);
@@ -628,3 +628,57 @@ assert.equal((await post({...interviewMutation,outline:'changed'})).status,503);
 let interviewState=await (await api.api.GET()).json();assert.equal(interviewState.state.interview[interviewFirst].outline,interviewMutation.outline);assert.equal(interviewState.revision,2);
 user={userId:'interview-other',email:'o@example.test'};interviewState=await (await api.api.GET()).json();assert.equal(interviewState.state.interview,undefined);
 console.log(JSON.stringify({interview:'passed',modules:8,sourceTopics:100,practiceTopics:97,sourcePages:387,frameworkPages:61,accountIsolation:true,randomCoverage:true}));
+
+// Mark questions are real server-graded additions, not reader-only associations.
+const markBank=study.questions.filter(q=>q.kind==='mark-authored');
+const markPoints=study.knowledge.filter(p=>p.markAuthored);
+assert.equal(markBank.length,212);assert.equal(markPoints.length,424);
+assert.equal(rawStudy.questions.filter(q=>q.kind==='mark-authored').length,212);
+assert.equal(study.markQuiz.unitCoverage.length,106);
+assert.equal(new Set(markBank.map(q=>q.concept)).size,106);
+assert.equal(markBank.filter(q=>q.answers).length,106);
+const markDistribution={2:0,3:0,4:0};let markGrades=0;
+for(const q of markBank){
+ assert(q.revision.startsWith('mark-'));
+ assert.equal(q.optionAssessments.length,4);
+ const raw=rawStudy.questions.find(r=>r.id===q.id);assert.deepEqual(Array.from(q.options),raw.options);assert.equal(q.revision,raw.revision);
+ const lesson=topicById.get(study.questionTopics[q.id]);assert(lesson.markRef);assert.equal(lesson.pointIds.length,4);
+ for(const [i,a] of q.optionAssessments.entries()){
+  assert.equal(a.optionIndex,i);assert(q.pointIds.includes(a.pointId));
+  assert.equal(markPoints.find(p=>p.id===a.pointId).statement,a.verifiedStatement);
+  assert(q.extension.includes(a.verifiedStatement));assert(q.options[i]===a.verifiedStatement||q.optionExplanations[i].includes(a.verifiedStatement));
+  assert(q.optionExplanations[i].includes(markPoints.find(p=>p.id===a.pointId).reasoning),'option explains its own authored distinction');
+  const ref=q.optionRefs[i];const d=JSON.parse(fs.readFileSync('public/materials/'+ref.source+'.json'));
+  assert(d.units.some(u=>u.blocks.some(b=>b.page===ref.page)),'exact source page is present');
+ }
+ if(q.answers)markDistribution[q.answers.length]++;
+ user={userId:'mark-grades-'+q.id,email:'m@example.test'};
+ const selections=q.answers?Array.from({length:15},(_,m)=>[0,1,2,3].filter(i=>(m+1)&(1<<i))):[0,1,2,3];
+ for(const choice of selections){
+  const expected=q.answers?JSON.stringify(q.answers)===JSON.stringify(choice):q.answer===choice;
+  const response=await post({type:'answer',questionId:q.id,questionRevision:q.revision,choice});assert.equal(response.status,200);
+  const result=await response.json();assert.equal(result.correct,expected);assert.equal(result.state.attempts[q.id].lastQuestionRevision,q.revision);markGrades++;
+ }
+}
+assert(markDistribution[2]>markDistribution[3]);assert(markDistribution[4]>0);
+const markFacts=JSON.parse(fs.readFileSync('src/mark-quiz-facts.json'));
+assert.equal(markFacts.length,106);assert.equal(new Set(markFacts.slice(0,86).map(r=>r.unit)).size,86);
+for(const group of markFacts){assert.equal(group.facts.length,4);for(const fact of group.facts){const d=JSON.parse(fs.readFileSync('public/materials/'+group.doc+'.json'));const u=d.units.find(u=>u.id===fact.unit);assert(u);const norm=s=>s.replace(/\s+/g,'').replace(/[“”·]/g,'').replace(/％/g,'%');assert(u.blocks.some(b=>b.page===fact.page&&norm(b.text).includes(norm(fact.anchor))));}}
+// Frontend result is immediate and preserves the session through exact Mark source navigation.
+user={userId:'mark-frontend',email:'mark@example.test'};await vm.runInContext('loadAccount()',context);
+$('quizType').value='mixed';$('startMark').onclick();assert.equal(vm.runInContext('practicePool.length',context),212);assert(vm.runInContext("practicePool.every(q=>q.kind==='mark-authored')",context));
+const markSingle=markBank.find(q=>!q.answers);vm.runInContext(`startQuiz([questionMap.get('${markSingle.id}')],'specific')`,context);
+assert(!contentText($('feedback')).includes('本节核心辨析'));
+const displayedWrong=vm.runInContext(`displayOrder.findIndex(i=>i!==queue[at].answer)`,context);
+$('options').children[displayedWrong].onclick();assert(contentText($('feedback')).includes('本项表述'));
+assert.equal(walk($('feedback')).filter(e=>e.className?.startsWith('option-note')).length,5); // wrapper plus four notes
+await drain();assert.equal(vm.runInContext(`state.attempts['${markSingle.id}'].lastCorrect`,context),false);
+const markSnapshot=practiceSnapshot(),markAttempt=vm.runInContext(`state.attempts['${markSingle.id}'].count`,context);
+vm.runInContext(`openMark('${markSingle.markRefs[0].doc}','${markSingle.markRefs[0].unit}')`,context);await vm.runInContext(`renderMark({doc:'${markSingle.markRefs[0].doc}',unit:'${markSingle.markRefs[0].unit}'})`,context);
+assert(contentText($('markContent')).includes('本节核心辨析与练习'));
+assert(walk($('markContent')).some(e=>e.textContent==='练本节知识 · 2 题'));
+walk($('markContent')).find(e=>e.textContent==='返回当前题').onclick();assert.equal(practiceSnapshot(),markSnapshot);
+assert.equal(vm.runInContext(`state.attempts['${markSingle.id}'].count`,context),markAttempt);
+vm.runInContext('nextQuestion()',context);assert(!$('quizPlay').className.includes('hidden'));
+user={userId:'mark-other-account',email:'other@example.test'};const markOther=await(await api.api.GET()).json();assert(!markOther.state.attempts[markSingle.id]);
+console.log(JSON.stringify({markQuiz:'passed',questions:212,independentlyAssessedPoints:424,specialtyThemes:86,coreTopics:20,multipleDistribution:markDistribution,exhaustiveGrades:markGrades,exactSourceAnchors:true,frontendImmediateGrading:true,wrongSync:true,readerReturn:true}));

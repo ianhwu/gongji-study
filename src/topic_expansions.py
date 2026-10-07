@@ -514,7 +514,8 @@ def compile_topics(study):
     """Use heading/prompt first. Every question gets a topical lesson or a clear unit overview."""
     chapters={c['id']:c for c in study['curriculum']}
     points={p['id']:p for p in study['knowledge']}
-    candidates={m['id']:[dict(t) for t in TOPICS if t['module']==m['id']] for m in study['modules']}
+    mark_topics=json.loads((Path(__file__).parent/'mark-quiz-topics.json').read_text())
+    candidates={m['id']:[dict(t) for t in TOPICS+mark_topics if t['module']==m['id']] for m in study['modules']}
     result=[]
     for module in study['modules']:
         guide=study['guides'][module['id']]

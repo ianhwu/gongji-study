@@ -17,6 +17,7 @@ function markUnitLinks(topicId){
  return links;
 }
 function markCourseReferences(t){
+ if(t.markRef){const box=el('div',undefined,'mark-course-links');box.append(markLink('对读本节马克讲义',t.markRef.doc,t.markRef.unit));return box;}
  const matches=markUnitLinks(t.id);if(!matches.length)return null;
  const details=el('details',undefined,'reading-detail mark-course-links');details.append(el('summary',`马克资料补充 · ${matches.length} 节`),el('p','对读讲义、导图与专项资料。按知识体系归类，相关资料保留具体内容和出处。','muted'));
  const box=el('div',undefined,'topic-point-list');for(const {d,u} of matches)box.append(markLink(u.title+' · '+d.category,d.id,u.id));details.append(box);return details;
@@ -42,7 +43,7 @@ async function renderMark(route={view:'materials'}){
 }
 function renderMarkCatalog(box,version){
  const header=el('div',undefined,'mark-intro');header.append(el('p','系统讲义 · 专题补充 · 图解复习','topic-eyebrow'),el('h2','马克资料学习馆'),el('p','讲义建立框架，导图梳理关系，专题补齐细节，题本用来复盘。'));
- const s=markLibrary.stats;header.append(el('p',`${s.files} 份非视频文件 · 合并为 ${s.documents} 组资料 · ${s.units} 个阅读单元 · 86 个专项专题`,'mark-summary'));box.append(header);
+ const s=markLibrary.stats;header.append(el('p',`${s.files} 份非视频文件 · 合并为 ${s.documents} 组资料 · ${s.units} 个阅读单元 · 86 个专项专题`,'mark-summary'));header.append(el('p',`${STUDY.markQuiz.questions} 道专题练习 · ${STUDY.markQuiz.points} 项核心辨析 · 86 个专题＋20组基础知识`,'mark-summary'),action('连续刷马克资料题',()=>startMarkQuiz(),'btn'));box.append(header);
  const method=el('div',undefined,'mark-methods');for(const m of markLibrary.methods||[]){const card=el('article');card.append(el('h3',m.title),el('p',m.text));method.append(card);}box.append(method);
  const filter=el('div',undefined,'mark-filter');const subject=el('select');subject.setAttribute('aria-label','马克资料学科');subject.append(markOption('全部学科','all'));for(const g of markLibrary.groups)subject.append(markOption(g.title,g.id));subject.value=markSubject;
  const category=el('select');category.setAttribute('aria-label','马克资料类型');category.append(markOption('全部类型','all'));for(const c of [...new Set(markLibrary.documents.map(d=>d.category))])category.append(markOption(c,c));category.value=markCategory;
@@ -74,13 +75,15 @@ function renderMarkCatalog(box,version){
 function renderMarkReader(doc,requestedUnit,box){
  const selected=doc.units.find(u=>u.id===requestedUnit)||doc.units[0];markActiveUnit=selected.id;
  const nav=el('nav',undefined,'mark-reader-toolbar');nav.setAttribute('aria-label','马克资料阅读导航');nav.append(action('← 返回资料目录',()=>openMark(),'btn secondary'));
- const at=doc.units.indexOf(selected);const prev=action('上一节',()=>openMark(doc.id,doc.units[at-1].id),'btn ghost'),next=action('下一节',()=>openMark(doc.id,doc.units[at+1].id),'btn');prev.disabled=at===0;next.disabled=at===doc.units.length-1;nav.append(prev,el('span',`${at+1} / ${doc.units.length}`,'muted small'),next);if(doc.answerUnitId)nav.append(action('题本答案区',()=>openMark(doc.id,doc.answerUnitId),'btn secondary'));if(practiceActive)nav.append(action('返回当前题',resumePractice,'btn secondary'));box.append(nav);
+ const at=doc.units.indexOf(selected);const prev=action('上一节',()=>openMark(doc.id,doc.units[at-1].id),'btn ghost'),next=action('下一节',()=>openMark(doc.id,doc.units[at+1].id),'btn');prev.disabled=at===0;next.disabled=at===doc.units.length-1;nav.append(prev,el('span',`${at+1} / ${doc.units.length}`,'muted small'),next);if(doc.answerUnitId)nav.append(action('题本答案区',()=>openMark(doc.id,doc.answerUnitId),'btn secondary'));if(practiceActive)nav.append(action('返回当前题',resumePractice,'btn secondary'));const practice=STUDY.questions.filter(q=>q.kind==='mark-authored'&&q.markRefs.some(r=>r.doc===doc.id&&r.unit===selected.id));if(practice.length)nav.append(action('练本节知识 · '+practice.length+' 题',()=>startMarkQuiz(doc.id,selected.id),'btn secondary'));box.append(nav);
  const layout=el('div',undefined,'mark-reader-layout'),sidebar=el('aside',undefined,'mark-reader-sidebar');sidebar.append(el('h3',doc.title),el('p',doc.category+' · '+doc.edition,'muted small'));
  const search=el('input');search.type='search';search.placeholder='查找本资料章节';search.setAttribute('aria-label','查找马克资料章节');sidebar.append(search);const list=el('div',undefined,'mark-reader-directory');const links=[];
  for(const u of doc.units){const b=action(u.title,()=>openMark(doc.id,u.id),'mark-unit-link'+(u===selected?' current':''));b.setAttribute('aria-current',u===selected?'page':'false');b.append(el('small',`原页 ${u.start}–${u.end}`));list.append(b);links.push({b,u});}search.oninput=()=>{for(const {b,u} of links)b.hidden=!(u.title+' '+u.overview).includes(search.value.trim());};sidebar.append(list);
  const article=el('article',undefined,'card mark-reader-body');article.append(el('p',(markGroups.get(selected.subject)?.title||'资料学习')+' · '+doc.category,'topic-eyebrow'),el('h2',selected.title),el('p',selected.overview,'mark-unit-overview'));
  const guide=el('section',undefined,'mark-study-guide');guide.append(el('h3','这一节怎么学'),el('p',selected.method),el('h4','容易混淆的边界'),el('p',selected.boundary));article.append(guide);
  if(selected.teaching){const lesson=el('section',undefined,'mark-study-guide space');lesson.append(el('h3',selected.teaching.title),el('p',selected.teaching.text));article.append(lesson);}
+ const assessedTopics=STUDY.topicExpansions.filter(t=>t.markRef?.doc===doc.id&&t.markRef.unit===selected.id);
+ for(const t of assessedTopics){const lesson=el('section',undefined,'mark-study-guide space');lesson.append(el('h3','本节核心辨析与练习'),topicDiagram(t),el('p',t.connection),action('学习这组完整知识',()=>openTopic(t.id),'btn secondary'));article.append(lesson);}
  // Existing authored topic lessons explain the matched source subject without adding guessed quiz answers.
  const topics=selected.topicIds.map(id=>topicMap.get(id)).filter(Boolean);
  if(topics.length){const teaching=el('section',undefined,'mark-teaching');teaching.append(el('h3','课程讲解与相关练习'));
