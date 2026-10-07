@@ -359,12 +359,14 @@ window.addEventListener('popstate',event=>{
  else window.location.reload?.();
 });
 function show(view,scroll=true,route={view}) {
+ if(view!=='interview')interviewStopClock();
  rememberNavigation(route);
  document.querySelectorAll('.view').forEach((el) => el.classList.toggle('active', el.id === view));
  document.querySelectorAll('.nav button[data-view]').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
  if (view === 'home') renderHome();
  if (view === 'library') renderLibrary();
  if (view === 'materials') void renderMark(route);
+ if (view === 'interview') {interviewStopClock();renderInterview(route);}
  if (view === 'wrong') renderWrong();
  if (view === 'quiz') {
   if(practiceActive&&!route.setup){$('quizSetup').classList.add('hidden');$('quizPlay').classList.remove('hidden');}
@@ -392,6 +394,7 @@ function renderHome() {
  const sources=$('sourceCoverage');sources.replaceChildren();
  if(STUDY.coverage.jilinPoints){const p=el('p','吉林省情专题');p.append(el('span',`${STUDY.coverage.jilinPoints} 个考点 · ${STUDY.coverage.jilinQuestions} 道原创练习 · ${STUDY.webSources.length} 项官方来源`));sources.append(p);}
  if(markLibrary.documents.length){const p=el('p','马克资料合集');p.append(el('span',`${markLibrary.stats.files} 份非视频文件 · ${markLibrary.stats.documents} 组学习资料 · ${markLibrary.stats.units} 节`),action('打开学习馆',()=>openMark(),'point-link'));sources.append(p);}
+ const interviewEntry=el('p','结构化面试');interviewEntry.append(el('span','8 个框架模块 · '+interviewLibrary.questions.length+' 道真题 · 提纲与复盘'),action('进入面试学习',()=>openInterview(),'point-link'));sources.append(interviewEntry);
  for(const source of STUDY.sources){const p=el('p',source.name);p.append(el('span',`${source.pages} 页可读资料 · ${STUDY.questions.filter(q=>q.source===source.id).length} 道题附出处`));sources.append(p);}
  const grid=$('moduleGrid');grid.className='subject-grid';grid.replaceChildren();
  SUBJECTS.forEach(([title,ids],index)=>{
@@ -972,12 +975,14 @@ function renderReadingChapter(chapter){
 function moveReadingChapter(delta){const chapters=readingChapters(currentChapter?.source||readingSource),index=chapters.findIndex(c=>c.id===currentChapter?.id),target=chapters[index+delta];if(target)openChapter(target.id);}
 
 /*__MARK_APP__*/
+/*__INTERVIEW_APP__*/
 renderHome(); loadAccount();
 const readingParams=new URLSearchParams(window.location.search||''),initialView=readingParams.get('view');
 if(topicMap.has(readingParams.get('topic')))openTopic(readingParams.get('topic'));
 else if(pointMap.has(readingParams.get('point')))openPoint(readingParams.get('point'));
 else if(chapterMap[readingParams.get('chapter')])openChapter(readingParams.get('chapter'),Number(readingParams.get('page'))||undefined);
 else if(moduleMap[readingParams.get('module')])openLesson(readingParams.get('module'));
+else if(initialView==='interview')openInterview(readingParams.get('doc'),readingParams.get('unit'));
 else if(initialView==='materials')openMark(readingParams.get('doc'),readingParams.get('unit'));
 else if(['home','library','quiz','wrong','tools','coverage'].includes(initialView))show(initialView,true,initialView==='quiz'&&readingParams.get('setup')==='1'?{view:'quiz',setup:true}:{view:initialView});
 else show('home',false);

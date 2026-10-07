@@ -32,7 +32,7 @@ const db = {
 let source = fs.readFileSync('app/api/progress/route.ts','utf8');
 source=source.replace(/^import .*;\n/gm,'').replace(/\bexport /g,'');
 source=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
-const api=vm.createContext({Response,Request,URL,Date,Map,Set,JSON,console:{error(){}},learning:rawStudy,history,
+const api=vm.createContext({Response,Request,URL,Date,Map,Set,JSON,console:{error(){}},learning:rawStudy,history,interviewLibrary:JSON.parse(fs.readFileSync('src/interview-library.json','utf8')),
   getChatGPTUser:async()=>user,getRawDb:()=>{if(unavailable) throw new Error('DB unavailable');return db;}});
 vm.runInContext(source+'\nglobalThis.api={GET,POST};',api);
 const request=(body,origin='https://study.test')=>new Request('https://study.test/api/progress',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -92,8 +92,8 @@ class Element {
 }
 const elements=new Map();
 const $=id=>{if(!elements.has(id)) elements.set(id,new Element(id)); return elements.get(id)};
-const views=['home','lesson','quiz','wrong','tools','coverage','library'].map($);
-const nav=['home','lesson','quiz','wrong','tools','coverage','library'].map(view=>{const e=new Element();e.dataset.view=view;return e});
+const views=['home','lesson','quiz','wrong','tools','coverage','library','materials','interview'].map($);
+const nav=['home','lesson','quiz','wrong','tools','coverage','library','materials','interview'].map(view=>{const e=new Element();e.dataset.view=view;return e});
 const document={querySelector:()=>null,getElementById:$,createElement:tag=>{const e=new Element();e.tag=tag;return e},createTextNode:text=>({textContent:text}),querySelectorAll:selector=>selector==='.view'?views:nav};
 let loseResponse=false,delayAnswer=false,releaseAnswer;const drafts=new Map();
 const browserEvents=new Map(),browserEntries=[];let browserIndex=0;
@@ -104,7 +104,7 @@ const browserWindow={location:{search:'?module=m14',pathname:'/study.html'},scro
  forward(){if(browserIndex+1<browserEntries.length){browserIndex++;browserEvents.get('popstate')({state:browserEntries[browserIndex].state});}}}};
 const context=vm.createContext({document,window:browserWindow,localStorage:{getItem:k=>drafts.get(k)||null,setItem:(k,v)=>drafts.set(k,v),removeItem:k=>drafts.delete(k)},crypto:webcrypto,URLSearchParams,Date,Math,Map,JSON,console,setTimeout,clearTimeout,
   fetch:async(url,options={})=>{
-    if(url.startsWith('references/')||url.startsWith('editions/')||url.startsWith('materials/'))return Response.json(JSON.parse(fs.readFileSync('public/'+url.split('?')[0],'utf8')));
+    if(url.startsWith('references/')||url.startsWith('editions/')||url.startsWith('materials/')||url.startsWith('interview/'))return Response.json(JSON.parse(fs.readFileSync('public/'+url.split('?')[0],'utf8')));
     if (options.method==='POST') {if(delayAnswer){delayAnswer=false;await new Promise(resolve=>releaseAnswer=resolve);}const response=await api.api.POST(request(JSON.parse(options.body)));if(loseResponse){loseResponse=false;throw new Error('network response lost')}return response;}
     return api.api.GET();
   }});
@@ -602,3 +602,29 @@ assert.equal(markUnits,mark.stats.units);assert.equal(markFigures,mark.stats.ima
 const themes=mark.documents.find(d=>d.category==='86专题');assert.equal(themes.unitCount,86);const themeDoc=JSON.parse(fs.readFileSync('public/materials/'+themes.id+'.json'));assert(themeDoc.units.every(u=>u.overview&&u.method.includes(u.overview)&&u.facts.length));assert.equal(themeDoc.units.filter(u=>u.teaching).length,31);assert(themeDoc.units[18].teaching.text.includes('而立30岁'));
 await vm.runInContext(`renderMark({view:'materials',doc:'${themes.id}',unit:'${themeDoc.units[18].id}'})`,context);assert(contentText($('markContent')).includes('而立30岁'),'supplement course has full foundational members');assert(contentText($('markContent')).includes('下一节'));assert(contentText($('markContent')).includes('返回资料目录'));
 console.log(JSON.stringify({markMaterials:'passed',files:manifest.length,documents:mark.documents.length,units:markUnits,figures:markFigures,xmindTrees:markTrees,themes:86,legacyQuizUnaffected:true}));
+// Interview materials: complete source spans, method units excluded from random practice,
+// previous/next and return retain the same prompt, and account notes are validated and isolated.
+const interview=study.interviewLibrary;
+assert.equal(interview.modules.length,8);assert.equal(interview.questions.length,100);
+assert.equal(interview.questions.filter(q=>q.kind==='question').length,97);
+const interviewRefs=JSON.parse(fs.readFileSync('public/interview/questions.json','utf8'));
+for(const q of interview.questions){assert(interviewRefs[q.id]?.length);assert(interviewRefs[q.id].every(p=>p.page>=q.start&&p.page<=q.end&&p.text.length));if(q.kind==='question')assert(q.stem.length>10);}
+assert.equal(JSON.stringify(interview.modules.flatMap(m=>m.lessons.flatMap(l=>l.pages.map(p=>p.page)))),JSON.stringify(Array.from({length:61},(_,i)=>i+6)));
+vm.runInContext("interviewFilter='all';interviewNext(true)",context);
+const interviewFirst=vm.runInContext('interviewQueue[0].id',context);
+for(let i=1;i<97;i++)vm.runInContext('interviewNext()',context);
+assert.equal(vm.runInContext('new Set(interviewQueue.map(q=>q.id)).size',context),97);
+assert(vm.runInContext("interviewQueue.every(q=>q.kind==='question')",context));
+const lastInterview=vm.runInContext('interviewQueue[interviewAt].id',context);
+vm.runInContext('interviewPrevious();interviewNext()',context);assert.equal(vm.runInContext('interviewQueue[interviewAt].id',context),lastInterview);
+vm.runInContext(`openInterview('practice','${interviewFirst}')`,context);assert.equal(vm.runInContext('interviewAt',context),0);
+user={userId:'interview-tester',email:'i@example.test'};
+assert.equal((await post({type:'interview',questionId:'unknown',outline:'x',review:''})).status,400);
+assert.equal((await post({type:'interview',questionId:interviewFirst,outline:'x'.repeat(12001),review:''})).status,400);
+const interviewMutation={type:'interview',questionId:interviewFirst,outline:'身份、目标、措施',review:'措施要更具体',mutationId:'interview-save-000001'};
+assert.equal((await post(interviewMutation)).status,200);
+assert.equal((await post(interviewMutation)).status,200);
+assert.equal((await post({...interviewMutation,outline:'changed'})).status,503);
+let interviewState=await (await api.api.GET()).json();assert.equal(interviewState.state.interview[interviewFirst].outline,interviewMutation.outline);assert.equal(interviewState.revision,2);
+user={userId:'interview-other',email:'o@example.test'};interviewState=await (await api.api.GET()).json();assert.equal(interviewState.state.interview,undefined);
+console.log(JSON.stringify({interview:'passed',modules:8,sourceTopics:100,practiceTopics:97,sourcePages:387,frameworkPages:61,accountIsolation:true,randomCoverage:true}));

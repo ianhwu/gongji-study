@@ -1,6 +1,7 @@
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { getRawDb } from "../../../db";
 import learning from "../../../src/learning.json";
+import interviewLibrary from "../../../src/interview-library.json";
 import history from "../../../src/question-history.json";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ type Attempt = {
   due: number;
 };
 type StudyState = {
+  interview?: Record<string, { outline: string; review: string; lastAt: number }>;
   planDay: number;
   learned: Record<string, boolean>;
   attempts: Record<string, Attempt>;
@@ -34,6 +36,7 @@ type Chapter = { id: string; start: number; end: number };
 const curriculum = [...learning.curriculum, ...learning.books] as Chapter[];
 const modules = new Set([...learning.modules.map((module) => module.id), ...curriculum.map((chapter) => chapter.id), ...learning.knowledge.map((point) => point.id)]);
 const chapters = new Map(curriculum.map((chapter) => [chapter.id, chapter]));
+const interviewQuestionIds = new Set(interviewLibrary.questions.map(question=>question.id));
 const emptyState = (): StudyState => ({ planDay: 1, learned: {}, attempts: {} });
 const noStore = { "Cache-Control": "no-store" };
 
@@ -82,7 +85,7 @@ function applyAction(state: StudyState, action: Record<string, unknown>) {
   let correct: boolean | undefined;
   const mutationId = typeof action.mutationId === "string" ? action.mutationId : "";
   if (mutationId && !/^[a-zA-Z0-9-]{16,80}$/.test(mutationId)) throw new Error("Invalid mutation ID");
-  const fingerprint = JSON.stringify([action.type, action.questionId, action.choice, action.moduleId, action.chapterId, action.page, action.actions, action.deviceId, action.sequence, ...(action.questionRevision === undefined ? [] : [action.questionRevision])]);
+  const fingerprint = JSON.stringify([action.type, action.questionId, action.choice, action.moduleId, action.chapterId, action.page, action.actions, action.deviceId, action.sequence, ...(action.type === "interview" ? [action.outline, action.review] : []), ...(action.questionRevision === undefined ? [] : [action.questionRevision])]);
   if (mutationId && state.receipts?.[mutationId]) {
     const receipt = state.receipts[mutationId];
     if (receipt.fingerprint !== fingerprint) throw new Error("Mutation already used");
@@ -95,6 +98,13 @@ function applyAction(state: StudyState, action: Record<string, unknown>) {
         if (!item || typeof item !== "object" || item.type !== "answer" || typeof item.mutationId !== "string") throw new Error("Invalid answer batch item");
         applyAction(state, item as Record<string, unknown>);
       }
+      break;
+    }
+    case "interview": {
+      const id=String(action.questionId||"");
+      if (!interviewQuestionIds.has(id) || typeof action.outline!=="string" || typeof action.review!=="string" || action.outline.length>12000 || action.review.length>6000) throw new Error("Invalid interview note");
+      state.interview ??= {};
+      state.interview[id]={outline:action.outline,review:action.review,lastAt:Date.now()};
       break;
     }
     case "learn": {

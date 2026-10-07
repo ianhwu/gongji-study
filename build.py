@@ -45,7 +45,8 @@ from topic_expansions import compile_topics, write_diagrams
 study["topicExpansions"], study["pointTopics"], study["questionTopics"] = compile_topics(study)
 write_diagrams(study["topicExpansions"], DIST)
 study["markLibrary"] = json.loads((SRC / "mark-library.json").read_text(encoding="utf-8"))
-study["contentVersion"] = hashlib.sha256((js_literal(pages)+js_literal(study["readingEdition"])+js_literal(editions)+js_literal(study["markLibrary"])).encode()).hexdigest()[:12]
+study["interviewLibrary"] = json.loads((SRC / "interview-library.json").read_text(encoding="utf-8"))
+study["contentVersion"] = hashlib.sha256((js_literal(pages)+js_literal(study["readingEdition"])+js_literal(editions)+js_literal(study["markLibrary"])+js_literal(study["interviewLibrary"])).encode()).hexdigest()[:12]
 (DIST / "references").mkdir(exist_ok=True)
 for source in pages["sources"]:
     rows = [{"p":p["p"],"t":p["t"]} for p in pages["pages"] if p["s"]==source["id"]]
@@ -54,7 +55,7 @@ for source in pages["sources"]:
 (DIST / "learning-data.js").write_text("const STUDY=" + js_literal(study) + ";\n", encoding="utf-8")
 
 learning = (SRC / "learning-template.html").read_text(encoding="utf-8")
-study_app = (SRC / "study-app.js").read_text(encoding="utf-8").replace("/*__MARK_APP__*/", (SRC / "mark-app.js").read_text(encoding="utf-8"))
+study_app = (SRC / "study-app.js").read_text(encoding="utf-8").replace("/*__MARK_APP__*/", (SRC / "mark-app.js").read_text(encoding="utf-8")).replace("/*__INTERVIEW_APP__*/", (SRC / "interview-app.js").read_text(encoding="utf-8"))
 (DIST / "study-app.js").write_text(study_app, encoding="utf-8")
 learning = learning.replace(
     "图片版 OCR 仅用来辅助定位；题目均已核对所标注的 PDF 原页。",
