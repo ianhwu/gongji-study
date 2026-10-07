@@ -25,6 +25,7 @@ function markCourseReferences(t){
 function markImage(info){
  const fig=el('figure',undefined,'mark-source-image'),link=el('a');link.href=info.asset;link.target='_blank';link.rel='noopener';link.setAttribute('aria-label','查看原图：'+info.caption);
  const image=el('img');image.src=info.asset;image.alt=info.caption;image.loading='lazy';image.decoding='async';image.width=info.width;image.height=info.height;link.append(image);
+ image.onerror=()=>{image.classList.add('hidden');if(!fig.dataset.failed){fig.dataset.failed='yes';fig.append(el('p','图片暂时无法加载，可点击原图链接重试，或核对下方原资料。','muted small'));}};
  fig.append(link,el('figcaption',info.caption+(info.page?' · 原资料第 '+info.page+' 页':'')+' · 点击放大'));return fig;
 }
 function markTree(tree,depth=0){
@@ -80,6 +81,7 @@ function renderMarkReader(doc,requestedUnit,box){
  const search=el('input');search.type='search';search.placeholder='查找本资料章节';search.setAttribute('aria-label','查找马克资料章节');sidebar.append(search);const list=el('div',undefined,'mark-reader-directory');const links=[];
  for(const u of doc.units){const b=action(u.title,()=>openMark(doc.id,u.id),'mark-unit-link'+(u===selected?' current':''));b.setAttribute('aria-current',u===selected?'page':'false');b.append(el('small',`原页 ${u.start}–${u.end}`));list.append(b);links.push({b,u});}search.oninput=()=>{for(const {b,u} of links)b.hidden=!(u.title+' '+u.overview).includes(search.value.trim());};sidebar.append(list);
  const article=el('article',undefined,'card mark-reader-body');article.append(el('p',(markGroups.get(selected.subject)?.title||'资料学习')+' · '+doc.category,'topic-eyebrow'),el('h2',selected.title),el('p',selected.overview,'mark-unit-overview'));
+ for(const p of STUDY.knowledge)if(p.markRef?.doc===doc.id&&p.markRef.unit===selected.id&&p.correction&&p.authority)article.append(correctionNotice(p));
  const guide=el('section',undefined,'mark-study-guide');guide.append(el('h3','这一节怎么学'),el('p',selected.method),el('h4','容易混淆的边界'),el('p',selected.boundary));article.append(guide);
  if(selected.teaching){const lesson=el('section',undefined,'mark-study-guide space');lesson.append(el('h3',selected.teaching.title),el('p',selected.teaching.text));article.append(lesson);}
  const assessedTopics=STUDY.topicExpansions.filter(t=>t.markRef?.doc===doc.id&&t.markRef.unit===selected.id);

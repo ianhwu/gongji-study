@@ -123,6 +123,8 @@ delayAnswer=true;
 const first=JSON.parse(vm.runInContext('JSON.stringify(queue[at])',context));
 answerQuestion(first);
 assert.equal(vm.runInContext('answered',context),true,'grade is synchronous before network response');
+assert($('quizCounter').textContent.includes('本次答对 1/1'),'counter updates with immediate feedback');
+assert(!$('practiceStatus').textContent.includes('当前范围已练 0/'),'coverage updates optimistically after answer');
 assert($('feedback').children.some(x=>x.textContent?.startsWith('答对了')));
 assert(!$('nextQuestion').className.includes('hidden'));
 vm.runInContext('nextQuestion()',context);
@@ -682,3 +684,36 @@ assert.equal(vm.runInContext(`state.attempts['${markSingle.id}'].count`,context)
 vm.runInContext('nextQuestion()',context);assert(!$('quizPlay').className.includes('hidden'));
 user={userId:'mark-other-account',email:'other@example.test'};const markOther=await(await api.api.GET()).json();assert(!markOther.state.attempts[markSingle.id]);
 console.log(JSON.stringify({markQuiz:'passed',questions:212,independentlyAssessedPoints:424,specialtyThemes:86,coreTopics:20,multipleDistribution:markDistribution,exhaustiveGrades:markGrades,exactSourceAnchors:true,frontendImmediateGrading:true,wrongSync:true,readerReturn:true}));
+
+// Overall review regressions: semantic corrections, chapter scope, login resumption and interview state.
+const correctedIds=['point-87ac20c0c281a9','point-183b99fc2d2398','point-b0f0abc094aae9','point-39598632bd971c','point-ece536ac76e9d3'];
+for(const id of correctedIds){const p=study.knowledge.find(p=>p.id===id);assert(p.authority&&p.correction&&p.reasoning);}
+assert(study.knowledge.find(p=>p.id===correctedIds[0]).statement.includes('2061'));
+assert(!study.knowledge.find(p=>p.id===correctedIds[0]).statement.includes('2062'));
+assert(!study.knowledge.some(p=>p.title.includes('注销许')||p.title.includes('神州九号')));
+for(const q of study.questions){const raw=rawStudy.questions.find(r=>r.id===q.id);assert.deepEqual(Array.from(q.options),raw.options,'published choices match server choices');assert.equal(q.revision,raw.revision,'published revision matches server revision');}
+assert.equal(vm.runInContext("chapterQuestions({id:'no-chapter',source:'no-source',start:1,end:3}).length",context),0,'empty chapter never silently falls back to entire module');
+const sourced=study.questions.find(q=>q.optionRefs?.some(r=>r.source!==q.source&&study.curriculum.some(c=>c.source===r.source&&r.page>=c.start&&r.page<=c.end)));
+const extra=sourced.optionRefs.find(r=>r.source!==sourced.source&&study.curriculum.some(c=>c.source===r.source&&r.page>=c.start&&r.page<=c.end));
+const linkedChapter=study.curriculum.find(c=>c.source===extra.source&&extra.page>=c.start&&extra.page<=c.end);
+assert(vm.runInContext(`chapterQuestions(chapterMap[${JSON.stringify(linkedChapter.id)}]).some(q=>q.id===${JSON.stringify(sourced.id)})`,context),'chapter questions include assessed secondary source anchors');
+const sessionDrafts=new Map();context.sessionStorage={getItem:k=>sessionDrafts.get(k)||null,setItem:(k,v)=>sessionDrafts.set(k,v),removeItem:k=>sessionDrafts.delete(k)};
+vm.runInContext("signedIn=false;accountReady=true;openLesson('m04');startQuiz(STUDY.questions.filter(q=>q.kind==='mark-authored'&&q.module==='m04'))",context);
+assert(browserWindow.location.href.includes('/account?returnTo='));assert(sessionDrafts.has('gongji-pending-practice'));
+user={userId:'review-login',email:'review@example.test'};await vm.runInContext('loadAccount()',context);
+assert(vm.runInContext("practicePool.every(q=>q.kind==='mark-authored'&&q.module==='m04')",context),'login restores selected Mark philosophy scope');assert(!sessionDrafts.has('gongji-pending-practice'));
+const negativeQ=study.questions.find(q=>!q.answers&&q.prompt.includes('不正确'));
+vm.runInContext(`startQuiz([questionMap.get(${JSON.stringify(negativeQ.id)})],'specific')`,context);assert($('questionType').textContent.includes('否定词'));
+const revisedMark=history.filter(q=>q.kind==='mark-authored'&&rawStudy.questions.find(n=>n.id===q.id)?.revision!==q.revision);
+for(const old of revisedMark){const response=await post({type:'answer',questionId:old.id,questionRevision:old.revision,choice:old.answers||old.answer});assert.equal(response.status,200);assert.equal((await response.json()).correct,true,'old Mark selections grade against original version');}
+const practiceInterview=study.interviewLibrary.questions.filter(q=>q.kind==='question').slice(0,2);
+vm.runInContext(`openInterview('practice',${JSON.stringify(practiceInterview[0].id)});interviewClock.elapsed=42000;openInterview(${JSON.stringify(practiceInterview[0].module)});openInterview('practice',${JSON.stringify(practiceInterview[0].id)})`,context);
+assert.equal(vm.runInContext('interviewClock.elapsed',context),42000,'framework round trip preserves current timer');
+vm.runInContext(`openInterview('practice',${JSON.stringify(practiceInterview[1].id)})`,context);assert.equal(vm.runInContext('interviewClock.elapsed',context),0,'selecting another question resets timer');
+const walkReview=e=>[e,...e.children.flatMap(walkReview)];
+const outlineReview=walkReview($('interviewContent')).find(e=>e['aria-label']==='面试答题提纲');outlineReview.value='材料中的身份、任务、矛盾和措施';outlineReview.oninput();
+vm.runInContext('interviewDrafts.clear()',context);vm.runInContext(`openInterview('practice',${JSON.stringify(practiceInterview[1].id)})`,context);
+assert.equal(walkReview($('interviewContent')).find(e=>e['aria-label']==='面试答题提纲').value,outlineReview.value,'session draft survives lost in-memory state');
+user={userId:'review-other',email:'other-review@example.test'};await vm.runInContext('loadAccount()',context);vm.runInContext(`openInterview('practice',${JSON.stringify(practiceInterview[1].id)})`,context);
+assert.equal(walkReview($('interviewContent')).find(e=>e['aria-label']==='面试答题提纲').value,'','session drafts never cross accounts');
+console.log(JSON.stringify({overallReview:'passed',correctedPoints:5,chapterScope:true,rawServerParity:true,loginScopeRestored:true,negativeInstructions:true,historicalMarkVersions:revisedMark.length,interviewTimer:true,refreshDraft:true,draftIsolation:true}));

@@ -26,6 +26,7 @@ script=script.replace("function requireAccount() {", """function requireAccount(
     return false;
   }""")
 script=script.replace("'/account'", "PAGES_ACCOUNT_ORIGIN+'/account'")
+script=script.replace("'/account?returnTo='", "PAGES_ACCOUNT_ORIGIN+'/account?returnTo='")
 (OUTPUT/'study-app.js').write_text(script)
 data=(OUTPUT/'learning-data.js').read_text().replace('"asset":"/images/visual/', '"asset":"images/visual/')
 (OUTPUT/'learning-data.js').write_text(data)

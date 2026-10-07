@@ -38,5 +38,6 @@ const walk=e=>[e,...(e.children||[]).flatMap(walk)];
 vm.runInContext("openPoint('jl-point-crater-lake')",context);assert(walk($('pointLesson')).some(e=>e.tag==='img'&&e.src==='images/visual/changbai-tianchi.jpg'));
 vm.runInContext('startEndless()',context);assert(context.window.location.href.startsWith(config.accountOrigin+'/study.html'));assert.equal(fetches,0,'account practice uses existing service without fake local account');
 assert(html.includes('href="'+config.accountOrigin+'/account"'),'account links use configured service');
+$('accountEntry').onclick();assert($('accountEntry').href.startsWith(config.accountOrigin+'/account?returnTo='),'account click keeps external service on Pages');
 assert(fs.existsSync(root+'/.nojekyll'));assert(!fs.existsSync(root+'/.openai'));assert(!fs.existsSync(root+'/.git'));
 console.log(JSON.stringify({status:'passed',checks:['course and Jilin entry initialize without server','67 images and all current knowledge diagrams load below repository subpath','all local HTML assets and links exist','account practice and login lead to configured account service','no Pages request to dynamic progress API','static artifact has no repository or hosting metadata']},null,2));

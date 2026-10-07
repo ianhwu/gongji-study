@@ -32,6 +32,8 @@ from grouped_concepts import apply_grouped
 apply_grouped(study)
 from full_coverage import apply_full_coverage
 apply_full_coverage(study)
+from content_review import apply_review
+apply_review(study)
 from reading_edition import compile_editions
 study["readingEdition"], editions = compile_editions(study,pages)
 (DIST / "editions").mkdir(exist_ok=True)
@@ -46,7 +48,7 @@ study["topicExpansions"], study["pointTopics"], study["questionTopics"] = compil
 write_diagrams(study["topicExpansions"], DIST)
 study["markLibrary"] = json.loads((SRC / "mark-library.json").read_text(encoding="utf-8"))
 study["interviewLibrary"] = json.loads((SRC / "interview-library.json").read_text(encoding="utf-8"))
-study["contentVersion"] = hashlib.sha256((js_literal(pages)+js_literal(study["readingEdition"])+js_literal(editions)+js_literal(study["markLibrary"])+js_literal(study["markQuiz"])+js_literal(study["interviewLibrary"])).encode()).hexdigest()[:12]
+study["contentVersion"] = hashlib.sha256((js_literal(pages)+js_literal(study)+js_literal(editions)).encode()).hexdigest()[:12]
 (DIST / "references").mkdir(exist_ok=True)
 for source in pages["sources"]:
     rows = [{"p":p["p"],"t":p["t"]} for p in pages["pages"] if p["s"]==source["id"]]

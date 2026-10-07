@@ -1,0 +1,63 @@
+{
+  "status": "passed",
+  "checks": [
+    "previous restores choices order and feedback without duplicate writes",
+    "forward returns to unfinished question and keeps multi draft",
+    "practice continues after history and resets on new scope",
+    "expanded verified licensed images and valid point associations",
+    "module image gallery and point jump",
+    "lazy image loading and source fallback",
+    "answer images shown only after grading",
+    "directory branches and scroll survive point/unit navigation",
+    "overview disclosure state restored",
+    "search does not overwrite collapsed branches",
+    "previous/next point navigation",
+    "unit selector stays open until explicit dismissal",
+    "question revisions preserve historical selections",
+    "retired question drafts remain saveable",
+    "uncertain references have no dead practice action",
+    "anonymous write denial",
+    "origin restriction",
+    "server answer validation",
+    "account isolation",
+    "concurrent saves",
+    "immediate grading while response is pending",
+    "two answers continue during background sync",
+    "account-scoped unsynced drafts",
+    "durable retry deduplication",
+    "idempotent retry after lost response",
+    "continuous new questions without reshuffled rounds",
+    "no repetition before unseen questions exhausted",
+    "account-based restart skips practiced questions",
+    "explicit review after bank exhausted",
+    "shuffled A-D options keep their own explanations",
+    "four explanations and extension on every question",
+    "module scope remains stable",
+    "multiple payload validation",
+    "exact set grading and persisted selection",
+    "reversible selection before submit",
+    "missed and wrong option explanations",
+    "single/multi/mixed continuous scopes",
+    "viewport fixed Next action with safe-area clearance",
+    "Jilin direct course entry",
+    "Jilin official web evidence",
+    "Jilin regional continuous practice",
+    "Jilin searchable authored notes",
+    "chapter reading position saved",
+    "chapter learned saved"
+  ],
+  "chapters": 303,
+  "questions": 1223
+}
+Reading edition passed: 303 chapters, 108 book guides, utility pages excluded, original screenshots preserved, corrected offsets, persistent directory and preferences.
+Original page screenshot and removed-chapter compatibility checks passed.
+Navigation passed: answer-to-knowledge return, browser back/forward, active quiz resumption, multi drafts, no duplicate writes, settings/exit, PDF page and coverage/wrong-list return.
+Topic expansions passed: 91 authored systems, all 1011 questions and 1152 points linked, functional diagram assets, safe factual image links, full-topic return and history preserve attempts.
+Multiple quality passed: 40 two-answer, 20 three-answer, 2 four-answer questions; all 992 subsets checked; all 62 old/new versions remain saveable.
+Grouped concepts passed: 21 enriched points; four principles explicitly rendered and included in answer expansion; diplomatic content and source corrected.
+{"fullCoverage":"passed","knowledge":1576,"questions":1223,"newQuestions":290,"exhaustiveGrades":2755,"continuousDrawsToCoverKnowledge":836}
+{"courseModules":"passed","subjects":10,"modules":13,"topics":197,"prerequisiteGroups":38,"assessedQuestions":1223,"inlineCourses":true,"defaultPointLeaves":0}
+{"markMaterials":"passed","files":282,"documents":141,"units":875,"figures":1145,"xmindTrees":60,"themes":86,"legacyQuizUnaffected":true}
+{"interview":"passed","modules":8,"sourceTopics":100,"practiceTopics":97,"sourcePages":387,"frameworkPages":61,"accountIsolation":true,"randomCoverage":true}
+{"markQuiz":"passed","questions":212,"independentlyAssessedPoints":424,"specialtyThemes":86,"coreTopics":20,"multipleDistribution":{"2":70,"3":31,"4":5},"exhaustiveGrades":2014,"exactSourceAnchors":true,"frontendImmediateGrading":true,"wrongSync":true,"readerReturn":true}
+{"overallReview":"passed","correctedPoints":5,"chapterScope":true,"rawServerParity":true,"loginScopeRestored":true,"negativeInstructions":true,"historicalMarkVersions":22,"interviewTimer":true,"refreshDraft":true,"draftIsolation":true}

@@ -30,7 +30,7 @@ type Row = { state_json: string; revision: number };
 
 type Question = { id: string; options: string[]; answer: number; answers?: number[]; revision?: string };
 const questions = new Map<string, Question>(learning.questions.map((question) => [question.id, question]));
-const legacyQuestions = new Map<string, Question>(history.map(question => [question.id, question]));
+const legacyQuestions = new Map<string, Question>(history.filter(question => !question.revision).map(question => [question.id, question]));
 const questionVersions = new Map<string, Question>(history.map(question => [JSON.stringify([question.id, question.revision || ""]), question]));
 type Chapter = { id: string; start: number; end: number };
 const curriculum = [...learning.curriculum, ...learning.books] as Chapter[];

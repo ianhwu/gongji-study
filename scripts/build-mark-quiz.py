@@ -44,6 +44,8 @@ for i, nums in {93:[12],94:[13],97:[20]}.items():
   seeds[i]['blocks'] += [dict(b,sourceUnit=extra['id']) for b in extra['blocks']]
 aliases={(47,0):'卡塔尔',(84,1):'神州九号',(89,3):'认识的发展',(91,3):'工农武装割据',(94,0):'先进生产力',(94,3):'执政为民'}
 for (i,n),a in aliases.items():rows[i][n]['anchor']=a
+for group in rows.values():
+ for row in group:row['label']=row['anchor'].replace('神州九号','神舟九号')
 allpoints=[];questions=[];topics=[];unmatched=[]
 normalize=lambda s: re.sub(r'\s+','',s).replace('％','%').replace('·','').replace('“','').replace('”','')
 for i,seed in enumerate(seeds):
@@ -54,13 +56,13 @@ for i,seed in enumerate(seeds):
   if not block:unmatched.append([i,n,row['anchor'],title])
   page=(block or seed['blocks'][0])['page']
   row.update(pointId=pid,page=page,source=seed['doc'],unit=(block or {}).get('sourceUnit',seed['unit']))
-  p=dict(id=pid,module=seed['module'],title=title+'：'+row['anchor'],statement=row['true'],source=seed['doc'],page=page,chapters=[],questionIds=[],originalTitle=title,status='ready',reasoning=row['note'],markAuthored=True,markRef=dict(doc=seed['doc'],unit=row['unit']),checkedAt='2026-10-07')
+  p=dict(id=pid,module=seed['module'],title=title+'：'+row['label'],statement=row['true'],source=seed['doc'],page=page,chapters=[],questionIds=[],originalTitle=title,status='ready',reasoning=row['note'],markAuthored=True,markRef=dict(doc=seed['doc'],unit=row['unit']),checkedAt='2026-10-07')
   if i in authorities:p['authority']=authorities[i]
   if i==41 and n==3:p['authority']='https://shanxi.chinatax.gov.cn/web/detail/sx-11400-545-1751470'
   if i==75 and n==3:p['correction']='本条已更新为人民银行自2025年1月数据起启用的M1口径；原讲义所列旧口径不用于本题判分。'
   allpoints.append(p)
- diagram=[dict(label=row['anchor'],text=row['true']) for row in rows[i]]
- topics.append(dict(id=tid,module=seed['module'],title=title+' · 马克资料专题',overview='本节按'+ '、'.join(r['anchor'] for r in rows[i])+'四个线索展开。先确认完整定义和对应关系，再用相邻概念比较，避免只记关键词。',diagram=diagram,connection=' '.join(r['note'] for r in rows[i]),boundary=seed['boundary'],variant='题目会改变人物、年份、机构、分类或适用条件。逐项核对完整表述；遇到“所有”“只能”“必然”时，检查是否遗漏条件或法定例外。',recall='不看答案，按知识框架复述四项内容，再分别说明一个容易混淆的错误说法及其理由。',layout='compare',markRef=dict(doc=seed['doc'],unit=seed['unit']),keywords=[]))
+ diagram=[dict(label=row['label'],text=row['true']) for row in rows[i]]
+ topics.append(dict(id=tid,module=seed['module'],title=title+' · 马克资料专题',overview='本节按'+ '、'.join(r['label'] for r in rows[i])+'四个线索展开。先确认完整定义和对应关系，再用相邻概念比较，避免只记关键词。',diagram=diagram,connection=' '.join(r['note'] for r in rows[i]),boundary=seed['boundary'],variant='题目会改变人物、年份、机构、分类或适用条件。逐项核对完整表述；遇到“所有”“只能”“必然”时，检查是否遗漏条件或法定例外。',recall='不看答案，按知识框架复述四项内容，再分别说明一个容易混淆的错误说法及其理由。',layout='compare',markRef=dict(doc=seed['doc'],unit=seed['unit']),keywords=[]))
  # One single and one multiple question per group; each option is independently assessed.
  # Every option has an authored distinction; truth masks are stable by ID.
  for v in [0,3]:
@@ -81,7 +83,13 @@ for i,seed in enumerate(seeds):
   q['revision']='mark-'+hashlib.sha256(json.dumps(q,ensure_ascii=False,sort_keys=True).encode()).hexdigest()[:16]
   questions.append(q)
 # Persist to raw data for server grading; preserve IDs and versions of the old bank.
-study=json.loads((S/'learning.json').read_text());study['questions']=[q for q in study['questions'] if q.get('kind')!='mark-authored']+questions;study['knowledge']=[p for p in study['knowledge'] if not p.get('markAuthored')]+allpoints
+study=json.loads((S/'learning.json').read_text())
+history=json.loads((S/'question-history.json').read_text())
+known={(q['id'],q.get('revision')) for q in history};latest={q['id']:q for q in questions}
+for old in study['questions']:
+ if old.get('kind')=='mark-authored' and old.get('revision')!=latest[old['id']]['revision'] and (old['id'],old.get('revision')) not in known:history.append(old)
+(S/'question-history.json').write_text(json.dumps(history,ensure_ascii=False,separators=(',',':'))+'\n')
+study['questions']=[q for q in study['questions'] if q.get('kind')!='mark-authored']+questions;study['knowledge']=[p for p in study['knowledge'] if not p.get('markAuthored')]+allpoints
 for p in allpoints:p['questionIds']=[q['id'] for q in questions if p['id'] in q['pointIds']]
 study['markQuiz']={'questions':len(questions),'points':len(allpoints),'specialtyUnits':86,'coreUnits':20,'sourceDocuments':sorted({s['doc'] for s in seeds}),'unitCoverage':[{'doc':s['doc'],'unit':s['unit'],'title':re.sub(r'^\d+ · ','',s['title']),'topicId':topics[i]['id'],'questionIds':[q['id'] for q in questions if q['concept']==f'mark-unit-{i+1:03d}']} for i,s in enumerate(seeds)],'basis':'已整理并核对的86个专题及系统讲义20个基础单元；每节四项核心辨析，题目为本站自编。未声称覆盖全部原文或全部题本原题。'}
 (S/'learning.json').write_text(json.dumps(study,ensure_ascii=False,indent=2)+'\n')

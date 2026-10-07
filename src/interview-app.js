@@ -2,6 +2,12 @@ const interviewLibrary=STUDY.interviewLibrary||{modules:[],questions:[],sources:
 const interviewModules=new Map(interviewLibrary.modules.map(m=>[m.id,m]));
 const interviewQuestions=new Map(interviewLibrary.questions.map(q=>[q.id,q]));
 let interviewFilter='all',interviewQuery='',interviewQueue=[],interviewAt=-1,interviewDrafts=new Map(),interviewSources=null,interviewClock={running:false,start:0,elapsed:0,phase:'思考'},interviewClockTimer=null,interviewRender=0;
+let interviewClockQuestion=null;
+function interviewSavedDraft(key,id){
+ let draft=interviewDrafts.get(key);
+ try{if(!draft)draft=JSON.parse(sessionStorage.getItem('gongji-interview-draft:'+key)||'null');if(signedIn){const handoff=JSON.parse(sessionStorage.getItem('gongji-interview-login-draft')||'null');if(handoff?.id===id){draft={outline:handoff.outline,review:handoff.review};sessionStorage.removeItem('gongji-interview-login-draft');sessionStorage.setItem('gongji-interview-draft:'+key,JSON.stringify(draft));}}}catch{}
+ return draft||state.interview?.[id]||{outline:'',review:''};
+}
 function openInterview(doc=null,unit=null){show('interview',true,{view:'interview',...(doc?{doc}:{}),...(unit?{unit}:{})});}
 function interviewParagraphs(text,box){for(const p of text.split(/\n\n+/)){box.append(el('p',p,'interview-source-text'));}}
 function interviewCourse(module,box,lessonId){
@@ -27,16 +33,23 @@ function interviewStopClock(){if(interviewClock.running)interviewClock.elapsed+=
 function interviewPractice(q,box,version){
  if(!q){interviewNext(true);return;}
  if(q.kind==='method'){interviewMethod(q,box,version);return;}
+ if(interviewClockQuestion!==q.id){interviewStopClock();interviewClock={running:false,start:0,elapsed:0,phase:'思考'};interviewClockQuestion=q.id;}
  const toolbar=el('div',undefined,'interview-toolbar');const prev=action('上一题',interviewPrevious,'btn secondary');prev.disabled=interviewAt<=0;toolbar.append(action('目录',()=>{interviewStopClock();openInterview();},'btn secondary'),prev,action('下一题',()=>interviewNext(),'btn'));box.append(toolbar);
  const article=el('article',undefined,'interview-article');article.append(el('p',`老夏真题100题 · 第 ${q.number} 题 · ${interviewModules.get(q.module)?.title||'综合练习'}`,'topic-eyebrow'),el('h2',q.title),el('p',q.stem,'interview-question'),el('p',`出处：原 PDF 第 ${q.start}–${q.end} 页 · 题干经过扫描识别，可用原页核对。`,'muted small'));
- const clock=el('div',undefined,'interview-clock'),display=el('strong'),limit=el('input');limit.type='number';limit.min='1';limit.max='30';limit.value='3';limit.setAttribute('aria-label','练习目标分钟');
+ const clock=el('div',undefined,'interview-clock'),display=el('strong'),limit=el('input');limit.id='interviewTargetMinutes';limit.type='number';limit.min='1';limit.max='30';limit.value='3';limit.setAttribute('aria-label','练习目标分钟');
  function tick(){const seconds=Math.floor((interviewClock.elapsed+(interviewClock.running?Date.now()-interviewClock.start:0))/1000);display.textContent=interviewClock.phase+' '+String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');display.className=seconds>=Number(limit.value)*60?'interview-time-over':'';if(interviewClock.running)interviewClockTimer=setTimeout(tick,250);}
- const toggle=action('开始 / 暂停',()=>{if(interviewClock.running)interviewStopClock();else{interviewClock.running=true;interviewClock.start=Date.now();}tick();},'btn secondary');clock.append(display,toggle,action('进入答题',()=>{interviewStopClock();interviewClock={running:true,start:Date.now(),elapsed:0,phase:'答题'};tick();},'btn secondary'),el('label','目标分钟'),limit);tick();article.append(clock);
- const key=accountId||'guest',draftKey=key+':'+q.id,saved=interviewDrafts.get(draftKey)||state.interview?.[q.id]||{outline:'',review:''};const outline=el('textarea');outline.value=saved.outline;outline.rows=5;outline.maxLength=12000;outline.placeholder='身份与任务 → 核心矛盾 → 三四个答题要点';outline.setAttribute('aria-label','面试答题提纲');const review=el('textarea');review.value=saved.review;review.rows=3;review.maxLength=6000;review.placeholder='哪一点没讲清？下一次怎样说得更具体？';review.setAttribute('aria-label','面试练习复盘');
+ const targetLabel=el('label','目标分钟');targetLabel.setAttribute('for','interviewTargetMinutes');
+ const toggle=action('开始 / 暂停',()=>{if(interviewClock.running)interviewStopClock();else{interviewClock.running=true;interviewClock.start=Date.now();}tick();},'btn secondary');clock.append(display,toggle,action('进入答题',()=>{interviewStopClock();interviewClock={running:true,start:Date.now(),elapsed:0,phase:'答题'};tick();},'btn secondary'),targetLabel,limit);tick();article.append(clock);
+ const key=accountId||'guest',draftKey=key+':'+q.id,saved=interviewSavedDraft(draftKey,q.id);const outline=el('textarea');outline.value=saved.outline;outline.rows=5;outline.maxLength=12000;outline.placeholder='身份与任务 → 核心矛盾 → 三四个答题要点';outline.setAttribute('aria-label','面试答题提纲');const review=el('textarea');review.value=saved.review;review.rows=3;review.maxLength=6000;review.placeholder='哪一点没讲清？下一次怎样说得更具体？';review.setAttribute('aria-label','面试练习复盘');
  const save=el('p',signedIn?'保存到账号后，可在其他设备继续。':'可以直接练习；登录后可保存提纲和复盘。','muted');
- const remember=()=>{interviewDrafts.set(draftKey,{outline:outline.value,review:review.value});save.textContent='当前页面草稿已保留，请保存到账号。';};outline.oninput=remember;review.oninput=remember;
- article.append(el('h3','我的答题提纲'),outline,el('h3','练后复盘'),el('p','检查：任务是否答全；理由是否紧扣材料；措施是否可执行；重点是否突出；语言是否自然、时间是否合适。'),review,action('保存提纲与复盘',async()=>{if(!requireAccount())return;save.textContent='正在保存…';try{await persist({type:'interview',questionId:q.id,outline:outline.value,review:review.value});save.textContent='已保存到账号，可跨设备查看。';}catch(e){save.textContent=e.message+'；当前页面草稿仍保留。';}},'btn'),save);
- const module=interviewModules.get(q.module);if(module)article.append(action('查看这类题的框架',()=>{interviewStopClock();openInterview(module.id);},'point-link'));
+ const remember=()=>{const draft={outline:outline.value,review:review.value};interviewDrafts.set(draftKey,draft);try{sessionStorage.setItem('gongji-interview-draft:'+draftKey,JSON.stringify(draft));}catch{}save.textContent='本标签页草稿已保留（刷新可恢复），请保存到账号。';};outline.oninput=remember;review.oninput=remember;
+ article.append(el('h3','我的答题提纲'),outline,el('h3','练后复盘'),el('p','检查：任务是否答全；理由是否紧扣材料；措施是否可执行；重点是否突出；语言是否自然、时间是否合适。'),review,action('保存提纲与复盘',async()=>{if(accountReady&&!signedIn){try{sessionStorage.setItem('gongji-interview-login-draft',JSON.stringify({id:q.id,outline:outline.value,review:review.value}));}catch{}}if(!requireAccount())return;save.textContent='正在保存…';try{await persist({type:'interview',questionId:q.id,outline:outline.value,review:review.value});interviewDrafts.delete(draftKey);try{sessionStorage.removeItem('gongji-interview-draft:'+draftKey);}catch{}save.textContent='已保存到账号，可跨设备查看。';}catch(e){save.textContent=e.message+'；当前页面草稿仍保留。';}},'btn'),save);
+ const module=interviewModules.get(q.module);
+ if(module){
+  const hint=el('details',undefined,'interview-hint');hint.append(el('summary','答题路径与复盘要点（展开前先独立作答）'),el('p','先确认身份、任务和材料中的矛盾，再按题型组织回答。以下是本题所属题型的练习框架，具体措施仍须结合本题情境。'));
+  const steps=el('ol');for(const step of module.steps)steps.append(el('li',step));hint.append(steps,el('strong','检查是否踩了这些坑'),el('p',module.pitfall),action('深入学习这类题的框架',()=>{interviewStopClock();openInterview(module.id);},'point-link'));article.append(hint);
+ }
+ article.append(el('p','历史题干按原资料的时间语境阅读；人物职务和政策表述不代表今天的状态。复盘时，将当时材料与现行情况分别梳理。','muted small'));
  const reference=el('details',undefined,'reading-detail');reference.append(el('summary','查看原资料讲解与原页'));const body=el('div');reference.append(body);let opened=false;reference.ontoggle=async()=>{if(!reference.open||opened)return;body.replaceChildren(el('p','正在读取讲解…'));try{if(!interviewSources)interviewSources=await fetch('interview/questions.json?v='+STUDY.contentVersion).then(r=>{if(!r.ok)throw new Error('讲解暂时无法加载');return r.json();});if(version!==interviewRender)return;body.replaceChildren();for(const page of interviewSources[q.id]||[]){body.append(el('h4','原 PDF 第 '+page.page+' 页'));for(const image of interviewLibrary.images||[])if(image.source==='laoxia'&&image.page===page.page)body.append(markImage(image));interviewParagraphs(page.text,body);}opened=true;}catch(e){body.replaceChildren(el('p',e.message));}};
  const pdf=el('a','打开原 PDF 核对','point-link');pdf.href='downloads/interview-100.pdf#page='+q.start;pdf.target='_blank';pdf.rel='noopener';reference.append(pdf);article.append(reference);box.append(article);
 }
